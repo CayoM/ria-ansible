@@ -96,5 +96,5 @@ spec:
           defaultMode: 420
       - name: video0
         hostPath:
-          path: /dev/video0
+          path: /dev/video1
           type: CharDevice
