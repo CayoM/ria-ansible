@@ -76,12 +76,12 @@ spec:
       # Service account / permissions not required for this demo
       containers:
       - name: backend
-        image: python:3.11-slim
+        image: christianscharfstein/camera-demo:latest
         securityContext:
             privileged: true
         command: ["sh", "-c"]
         args:
-          - apt-get update && apt-get install -y ffmpeg libsm6 libxext6 && pip install --no-cache-dir flask opencv-python-headless && python /app/app.py
+          -  python /app/app.py
         ports:
         - containerPort: 5000
         volumeMounts:
