@@ -42,7 +42,7 @@
 
 - name: Wait for MetalLB to install 
   ansible.builtin.pause: 
-    seconds: 30
+    seconds: 45
 
 - name: Copy and apply MetalLB Resources (IP Pool)
   ansible.builtin.shell: |
