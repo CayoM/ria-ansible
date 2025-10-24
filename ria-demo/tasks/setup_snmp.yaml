@@ -53,17 +53,25 @@
     insertafter: '^sysContact.*'
   notify: "restart snmpd"
 
-- name: Add createUser (will be consumed into /var/lib/snmp/snmpd.conf)
+- name: Configure SNMPv2c community
   lineinfile:
     path: /etc/snmp/snmpd.conf
-    insertafter: EOF
-    line: 'createUser {{ snmp_v3_user }} {{ snmp_v3_auth_protocol }} "{{ snmp_v3_auth_pass }}" {{ snmp_v3_priv_protocol }} "{{ snmp_v3_priv_pass }}"'
-  notify: "restart snmpd"
-
-- name: Ensure rouser has authPriv
-  lineinfile:
-    path: /etc/snmp/snmpd.conf
-    regexp: '^rouser\s+{{ snmp_v3_user }}\s+priv'
-    line: 'rouser {{ snmp_v3_user }} priv'
+    regexp: '^rocommunity'
+    line: 'rocommunity {{ snmp_v2_community | default("public") }}  default'
     insertafter: '^sysLocation.*'
   notify: "restart snmpd"
+
+# - name: Add createUser (will be consumed into /var/lib/snmp/snmpd.conf)
+#   lineinfile:
+#     path: /etc/snmp/snmpd.conf
+#     insertafter: EOF
+#     line: 'createUser {{ snmp_v3_user }} {{ snmp_v3_auth_protocol }} "{{ snmp_v3_auth_pass }}" {{ snmp_v3_priv_protocol }} "{{ snmp_v3_priv_pass }}"'
+#   notify: "restart snmpd"
+
+# - name: Ensure rouser has authPriv
+#   lineinfile:
+#     path: /etc/snmp/snmpd.conf
+#     regexp: '^rouser\s+{{ snmp_v3_user }}\s+priv'
+#     line: 'rouser {{ snmp_v3_user }} priv'
+#     insertafter: '^sysLocation.*'
+#   notify: "restart snmpd"
