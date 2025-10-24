@@ -40,11 +40,17 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-- name: Wait for MetalLB to install 
-  ansible.builtin.pause: 
-    seconds: 30
+- name: Wait for MetalLB CRDs to be ready
+  ansible.builtin.shell: |
+    kubectl wait --for=condition=Established crd/ipaddresspools.metallb.io --timeout=120s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: wait_result
+  retries: 5
+  delay: 10
+  until: wait_result.rc == 0
 
-- name: Copy and apply MetalLB Resources (IP Pool)
+- name: Apply MetalLB Resources (IP Pool)
   ansible.builtin.shell: |
     kubectl apply -n metallb-system -f - <<EOF
     apiVersion: metallb.io/v1beta1
@@ -60,7 +66,7 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-- name: Copy and apply MetalLB Resources (Advert)
+- name: Apply MetalLB Resources (Advert)
   ansible.builtin.shell: |
     kubectl apply -n metallb-system -f - <<EOF
     apiVersion: metallb.io/v1beta1
