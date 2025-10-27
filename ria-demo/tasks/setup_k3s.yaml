@@ -50,6 +50,17 @@
   delay: 10
   until: wait_result.rc == 0
 
+- name: Wait until MetalLB webhook service is ready
+  ansible.builtin.shell: |
+    kubectl get endpoints metallb-webhook-service -n metallb-system -o jsonpath='{.subsets[*].addresses[*].ip}'
+  register: metallb_webhook
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 15          # bis zu ~90 Sekunden
+  delay: 6
+  until: metallb_webhook.stdout != ""
+  changed_when: false
+  
 - name: Apply MetalLB Resources (IP Pool)
   ansible.builtin.shell: |
     kubectl apply -n metallb-system -f - <<EOF
