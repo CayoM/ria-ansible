@@ -1,0 +1,40 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camera-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: camera-backend
+  template:
+    metadata:
+      labels:
+        app: camera-backend
+    spec:
+      # Service account / permissions not required for this demo
+      containers:
+        - name: backend
+          image: christianscharfstein/camera-demo:latest
+          securityContext:
+            privileged: true
+          command: ["sh", "-c"]
+          args:
+            - python /app/app.py
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: app-code
+              mountPath: /app
+            - name: video0
+              mountPath: /dev/video0
+      volumes:
+        - name: app-code
+          configMap:
+            name: camera-backend-app-cm
+            defaultMode: 420
+        - name: video0
+          hostPath:
+            path: /dev/video0
+            type: CharDevice

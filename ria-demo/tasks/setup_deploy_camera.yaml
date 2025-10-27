@@ -6,272 +6,38 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-
 - name: Camera App Backend Setup
   when: service_type == 'backend' or service_type == 'full'
   block:
+    - name: Copy Camera Backend File
+      ansible.builtin.copy:
+        src: files/camera-backend.yaml
+        dest: /tmp/camera-backend.yaml
+        mode: "0644"
     - name: Create Camera App backend ConfigMap
       ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: camera-backend-app-cm
-        data:
-          app.py: |
-            import cv2, threading, time
-            from flask import Flask, Response
-
-            app = Flask(__name__)
-
-            class Camera:
-                def __init__(self):
-                    self.cap = cv2.VideoCapture(0)
-                    if not self.cap.isOpened():
-                        raise RuntimeError("Could not open video device")
-                    self.frame = None
-                    self.lock = threading.Lock()
-                    t = threading.Thread(target=self._update, daemon=True)
-                    t.start()
-
-                def _update(self):
-                    while True:
-                        ret, frame = self.cap.read()
-                        if ret:
-                            with self.lock:
-                                self.frame = frame
-                        time.sleep(0.03)  # ~30fps
-
-                def get_jpeg(self):
-                    with self.lock:
-                        if self.frame is None:
-                            return None
-                        ret, jpeg = cv2.imencode(".jpg", self.frame)
-                        if ret:
-                            return jpeg.tobytes()
-                        return None
-
-            camera = Camera()
-
-            def mjpeg_gen():
-                while True:
-                    frame = camera.get_jpeg()
-                    if frame:
-                        yield (b'--frame\r\n'
-                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                    time.sleep(0.03)
-
-            @app.route("/video_feed")
-            def video_feed():
-                return Response(mjpeg_gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
-            @app.route('/')
-            def index():
-                # Simple human-readable page for debug if accessed directly
-                return render_template_string('<html><body><h1>Backend: webcam stream</h1><img src="/video_feed"></body></html>')
-
-            if __name__ == '__main__':
-                # listen on 0.0.0.0 so other pods can reach it
-                app.run(host='0.0.0.0', port=5000)
-        EOF
+        kubectl apply -n {{ app_namespace }} -f /tmp/camera-backend.yaml
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-    - name: Create Camera App backend deployment
-      ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: camera-backend
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app: camera-backend
-          template:
-            metadata:
-              labels:
-                app: camera-backend
-            spec:
-              # Service account / permissions not required for this demo
-              containers:
-              - name: backend
-                image: python:3.11-slim
-                securityContext:
-                    privileged: true
-                command: ["sh", "-c"]
-                args:
-                  - apt-get update && apt-get install -y ffmpeg libsm6 libxext6 && pip install --no-cache-dir flask opencv-python-headless && python /app/app.py
-                ports:
-                - containerPort: 5000
-                volumeMounts:
-                - name: app-code
-                  mountPath: /app
-                - name: video0
-                  mountPath: /dev/video0
-              volumes:
-              - name: app-code
-                configMap:
-                  name: camera-backend-app-cm
-                  defaultMode: 420
-              - name: video0
-                hostPath:
-                  path: /dev/video0
-                  type: CharDevice
-        EOF
-      environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
-    - name: Expose Camera App backend service
+    - name: Expose Camera App backend service # Do it this way to have variable name of service obvious in Ansible.
       ansible.builtin.shell: |
         kubectl expose deployment camera-backend \
           --port=5000 --target-port=5000 \
-          --name=camera-backend --type=ClusterIP -n {{ app_namespace }} || true
+          --name=camera-backend-{{ instance_name | lower }} --type=ClusterIP -n {{ app_namespace }} || true
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
 
 - name: Camera App Frontend Setup
   when: service_type == 'frontend'  or service_type == 'full'
   block:
+    - name: Copy Camera Frontend files
+      ansible.builtin.copy:
+        src: files/camera-frontend.yaml
+        dest: /tmp/camera-frontend.yaml
+        mode: "0644"
     - name: Create Camera App frontend ConfigMap
       ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: v1
-        kind: ConfigMap
-        metadata:
-          name: frontend-files-cm
-        data:
-          index.html: |
-            <!doctype html>
-            <html>
-            <head>
-              <meta charset="utf-8" />
-              <title>Webcam Demo Frontend</title>
-              <style>body{display:flex;flex-direction:column;align-items:center;padding:1rem;font-family:sans-serif} img{max-width:90%;height:auto;border:1px solid #ddd;border-radius:8px}</style>
-            </head>
-            <body>
-              <h1>Webcam feed (proxied)</h1>
-              <p>The image below is an MJPEG stream proxied by this frontend from the backend service.</p>
-              <img id="cam" src="/video_feed" alt="webcam feed" />
-            </body>
-            </html>
-          nginx.conf: |
-            worker_processes  1;
-            error_log /var/log/nginx/error.log warn;
-            pid /var/run/nginx.pid;
-            events { worker_connections 1024; }
-            http {
-              sendfile on;
-              tcp_nopush on;
-              server {
-                listen 80;
-                location / {
-                  root /usr/share/nginx/html;
-                  index index.html;
-                }
-                # Proxy MJPEG stream to backend service inside the cluster
-                location /video_feed {
-                  # upstream backend service name: backend-service on port 5000
-                  proxy_pass http://camera-backend:5000/video_feed;
-                  proxy_http_version 1.1;
-                  proxy_buffering off;
-                  proxy_request_buffering off;
-                  # Preserve long-lived connections
-                  proxy_set_header Connection "keep-alive";
-                  chunked_transfer_encoding off;
-                }
-              }
-            }
-        EOF
-      environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
-    - name: Create Camera App frontend deployment
-      ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: camera-frontend
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app: camera-frontend
-          template:
-            metadata:
-              labels:
-                app: camera-frontend
-            spec:
-              containers:
-              - name: nginx
-                image: nginx:stable
-                ports:
-                - containerPort: 80
-                volumeMounts:
-                - name: frontend-files
-                  mountPath: /usr/share/nginx/html
-                - name: nginx-conf
-                  mountPath: /etc/nginx/nginx.conf
-                  subPath: nginx.conf
-              volumes:
-              - name: frontend-files
-                configMap:
-                  name: frontend-files-cm
-                  items:
-                    - key: index.html
-                      path: index.html
-              - name: nginx-conf
-                configMap:
-                  name: frontend-files-cm
-                  items:
-                    - key: nginx.conf
-                      path: nginx.conf
-        EOF
-      environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
-    - name: Expose Camera App frontend service
-      ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: v1
-        kind: Service
-        metadata:
-          name: frontend-service
-        spec:
-          selector:
-            app: camera-frontend
-          ports:
-          - protocol: TCP
-            port: 80
-            targetPort: 80
-            nodePort: 30080
-          type: NodePort
-      environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-
-    - name: Create Ingress for Camera App
-      ansible.builtin.shell: |
-        kubectl apply -n {{ app_namespace }} -f - <<EOF
-        apiVersion: networking.k8s.io/v1
-        kind: Ingress
-        metadata:
-          name: camera-ingress
-          annotations:
-            traefik.ingress.kubernetes.io/router.entrypoints: web
-        spec:
-          rules:
-            - http:
-                paths:
-                  - path: /
-                    pathType: Prefix
-                    backend:
-                      service:
-                        name: camera-frontend
-                        port:
-                          number: 80
-        EOF
+        kubectl apply -n {{ app_namespace }} -f /tmp/camera-frontend.yaml
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
