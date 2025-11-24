@@ -9,6 +9,7 @@ feature_sevone: true
 feature_hcm: true
 ###############################
 
+ec2_public_ip: ""
 
 guard_cloud_init: true
 
@@ -57,7 +58,7 @@ palmctl_download_url: "https://github.com/IBM/palmctl/releases/latest/download/{
 palmctl_local_path: "/tmp"
 hcm_agent_namespace: "hcm"
 hcm_storage_class: "local-path"
-hcm_agent_name: "hcm-{{ instance_name }}"
+hcm_agent_name: "hcm-{{ instance_name }}-{{ ec2_public_ip }}"
 mesh_api_key: ""
 mesh_endpoint_url: "https://app.hybridcloudmesh.ibm.com"
 

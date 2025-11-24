@@ -48,6 +48,10 @@
   register: set_context_result
   changed_when: "'set' in set_context_result.stdout"
 
+- name: Get public IP
+  ansible.builtin.shell: curl -s http://checkip.amazonaws.com
+  register: ec2_public_ip
+  
 - name: Install Mesh Agent with palmctl
   ansible.builtin.shell: |
     palmctl install openhorizon \
