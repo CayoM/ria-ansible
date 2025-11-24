@@ -4,7 +4,6 @@
 ######## Feature Flags ########
 feature_kubecost: true
 feature_instana: true
-feature_turbonomic: true
 feature_sevone: true
 feature_hcm: true
 ###############################
