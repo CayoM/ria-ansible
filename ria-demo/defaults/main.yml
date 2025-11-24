@@ -8,8 +8,6 @@ feature_sevone: true
 feature_hcm: true
 ###############################
 
-ec2_public_ip: ""
-
 guard_cloud_init: true
 
 ansible_user: ubuntu
