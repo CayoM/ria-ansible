@@ -52,10 +52,14 @@
   ansible.builtin.shell: curl -s http://checkip.amazonaws.com
   register: ec2_public_ip
   
+- name: Set Agent name
+  ansible.builtin.set_fact:
+    hcm_agent_name_ip: "{{ hcm_agent_name }}-{{ ec2_public_ip.stdout | replace('.', '') }}"
+
 - name: Install Mesh Agent with palmctl
   ansible.builtin.shell: |
     palmctl install openhorizon \
-      --name {{ hcm_agent_name }} \
+      --name {{ hcm_agent_name_ip }} \
       --namespace {{ app_namespace }} \
       --storage-class {{ hcm_storage_class }} \
       -d {{ palmctl_local_path }} \

@@ -12,7 +12,6 @@ guard_cloud_init: true
 
 ansible_user: ubuntu
 instance_name: "cayo123"
-instance_random_suffix: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters length=3') }}"
 
 location: "south"
 new_hostname: "{{ instance_name }}-{{ service_type }}.{{ instana_zone_name | lower }}"
@@ -57,7 +56,7 @@ palmctl_download_url: "https://github.com/IBM/palmctl/releases/latest/download/{
 palmctl_local_path: "/tmp"
 hcm_agent_namespace: "hcm"
 hcm_storage_class: "local-path"
-hcm_agent_name: "hcm-{{ instance_name }}-{{ instance_random_suffix }}"
+hcm_agent_name: "hcm-{{ instance_name }}"
 mesh_api_key: ""
 mesh_endpoint_url: "https://app.hybridcloudmesh.ibm.com"
 

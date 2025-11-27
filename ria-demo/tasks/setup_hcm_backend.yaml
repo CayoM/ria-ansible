@@ -3,6 +3,10 @@
   ansible.builtin.shell: curl -s http://checkip.amazonaws.com
   register: ec2_public_ip
 
+- name: Set Agent name
+  ansible.builtin.set_fact:
+    hcm_agent_name_ip: "{{ hcm_agent_name }}-{{ ec2_public_ip.stdout | replace('.', '') }}"
+
 - name: wait 10 sec
   ansible.builtin.command: sleep 10
 
@@ -174,7 +178,7 @@
     hcm_gateway_id: >-
       {{
         (hcm_existing_gateways.stdout | from_yaml).gateways
-        | selectattr('name', 'equalto', hcm_agent_name)
+        | selectattr('name', 'equalto', hcm_agent_name_ip)
         | map(attribute='resource_id')
         | first
       }}
