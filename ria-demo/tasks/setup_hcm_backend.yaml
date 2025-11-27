@@ -174,7 +174,7 @@
     hcm_gateway_id: >-
       {{
         (hcm_existing_gateways.stdout | from_yaml).gateways
-        | selectattr('name', 'equalto', hcm_agent_name ~ '-' ~ ec2_public_ip.stdout)
+        | selectattr('name', 'equalto', hcm_agent_name)
         | map(attribute='resource_id')
         | first
       }}
