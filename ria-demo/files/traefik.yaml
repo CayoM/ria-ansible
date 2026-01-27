@@ -12,8 +12,8 @@ ports:
       default: true
     hostPort: 443
     protocol: TCP
-    tls:
-      enabled: true
+    # tls:
+    #   enabled: true
 
   kubecost:
     port: 9090
