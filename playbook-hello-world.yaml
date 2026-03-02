@@ -1,5 +1,5 @@
 - name: Dummy Playbook
-  hosts: localhost
+  hosts: all
 
   tasks:
     - name: Print debug message
