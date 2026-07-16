@@ -129,3 +129,85 @@
         YAML
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+
+
+- name: Full Setup
+  when: service_type == 'full'
+  block:
+    - name: Install Robot Shop (full) with Helm
+      ansible.builtin.shell: |
+        helm upgrade --install robot-shop {{ robotshop_clone_dir }}/K8s/helm \
+          -n {{ app_namespace }} --create-namespace \
+          --set eum.key={{ instana_eum_key }} \
+          --set eum.url=https://{{ instana_endpoint_host }} \
+          --set nodeport=true --set openshift=false
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Create Ingress
+      ansible.builtin.shell: |
+        kubectl apply -n {{ app_namespace }} -f - <<EOF
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: robotshop-web-ingress
+          namespace: {{ app_namespace }}
+        spec:
+          # k3s nutzt Traefik; falls keine Default-IngressClass gesetzt ist, explizit angeben:
+          ingressClassName: traefik
+          rules:
+            - http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: web
+                        port:
+                          number: 8080
+        EOF
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Deploy Load Generator
+      ansible.builtin.shell: |
+        kubectl apply -n {{ app_namespace }} -f - <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: load
+          labels:
+            service: load
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              service: load
+          template:
+            metadata:
+              labels:
+                service: load
+            spec:
+              containers:
+              - name: load
+                env:
+                  - name: HOST
+                    value: "http://web:8080/"
+                  - name: NUM_CLIENTS
+                    value: "15"
+                  - name: SILENT
+                    value: "1"
+                  - name: ERROR
+                    value: "1"
+                image: robotshop/rs-load:latest
+                resources:
+                  limits:
+                    cpu: 200m
+                    memory: 200Mi
+                  requests:
+                    cpu: 100m
+                    memory: 100Mi
+        EOF
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml

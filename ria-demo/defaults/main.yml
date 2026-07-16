@@ -22,7 +22,7 @@ terraform_pkg_url: "https://releases.hashicorp.com/terraform/{{ __terraform_vers
 
 # Web App
 app_name: "robotshop" # robotshop, qotd, flightmonitor
-service_type: "frontend" # frontend / backend
+service_type: "frontend" # frontend / backend / full
 app_namespace: "super-automation-demo"
 registry_pwd: ""
 
