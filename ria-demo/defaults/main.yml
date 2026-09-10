@@ -10,6 +10,10 @@ feature_hcm: true
 
 guard_cloud_init: true
 
+# Pinned instead of "stable" (resolved via update.k3s.io) to avoid depending on
+# that channel-resolution service's availability during install.
+k3s_version: "v1.36.4+k3s1"
+
 ansible_user: ubuntu
 instance_name: "cayo123"
 
