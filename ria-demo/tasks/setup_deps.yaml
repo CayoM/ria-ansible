@@ -1,3 +1,13 @@
+- name: Ensure ca-certificates package is installed and up to date
+  ansible.builtin.package:
+    name: ca-certificates
+    state: latest
+    update_cache: true
+
+- name: Regenerate CA trust store (fresh cloud images sometimes boot with an incomplete store)
+  ansible.builtin.command: update-ca-certificates --fresh
+  changed_when: true
+
 - name: Derive short hostname
   ansible.builtin.set_fact:
     short_hostname: "{{ new_hostname.split('.')[0] }}"
