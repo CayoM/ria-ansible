@@ -42,26 +42,6 @@
   tags:
     - instana
 
-- name: Include HCM Agent Setup
-  when: (feature_hcm | bool) and (service_type != "full")
-  ansible.builtin.include_tasks:
-    file: setup_hcm_agent.yaml
-    apply:
-      tags:
-        - hcm
-  tags:
-    - hcm
-
-- name: Include HCM Backend Setup
-  when: (feature_hcm | bool) and (service_type != "full")
-  ansible.builtin.include_tasks:
-    file: setup_hcm_backend.yaml
-    apply:
-      tags:
-        - hcm
-  tags:
-    - hcm
-
 - name: Include KubeCost Setup
   when: feature_kubecost | bool
   ansible.builtin.include_tasks:
