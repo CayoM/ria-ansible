@@ -41,6 +41,42 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
+# Read-only access for Concert (IBM Concert Platform) to register this cluster
+# as an Environment (Inventory > Environments > Kubernetes) and pull topology
+# via its "kubernetes" connector. Kept separate from every app-specific
+# ServiceAccount above/below on purpose - this one only ever needs the
+# built-in "view" ClusterRole, same read-only scope Concert's docs ask for.
+# Published as job artifacts (ansible.builtin.set_stats) so the calling
+# Concert Workflow job (AAP-run-job-by-name / AAP-watch-job-by-name) can read
+# them from $<step>.output without a separate SSH/API round trip - see
+# cw-workflows/Register-Concert-Kubernetes-Environment.yaml in the
+# optimized-solution repo, which consumes exactly these three keys.
+#
+# No ignore_errors here on purpose: the user wants to actually test this run,
+# not have failures silently swallowed. Watch this step on the first live run.
+- name: Create read-only ServiceAccount for Concert environment registration
+  ansible.builtin.shell: |
+    kubectl create serviceaccount concert-environment-reader -n kube-system --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create clusterrolebinding concert-environment-reader-view --clusterrole=view --serviceaccount=kube-system:concert-environment-reader --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Mint a long-lived token for the Concert ServiceAccount
+  ansible.builtin.shell: kubectl create token concert-environment-reader -n kube-system --duration=8760h
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: concert_sa_token
+  changed_when: false
+  no_log: true
+
+- name: Publish Concert environment registration data as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      k3s_endpoint: "https://{{ ec2_public_ip.stdout }}:6443"
+      k3s_token: "{{ concert_sa_token.stdout }}"
+      cluster_name: "{{ instana_cluster_name }}"
+  no_log: true
+
 - name: Install MetalLB via Helm
   ansible.builtin.shell: helm upgrade --install metallb oci://registry.suse.com/edge/charts/metallb --namespace metallb-system --create-namespace
   environment:
