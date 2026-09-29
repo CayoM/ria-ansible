@@ -44,20 +44,78 @@
 # Read-only access for Concert (IBM Concert Platform) to register this cluster
 # as an Environment (Inventory > Environments > Kubernetes) and pull topology
 # via its "kubernetes" connector. Kept separate from every app-specific
-# ServiceAccount above/below on purpose - this one only ever needs the
-# built-in "view" ClusterRole, same read-only scope Concert's docs ask for.
-# Published as job artifacts (ansible.builtin.set_stats) so the calling
-# Concert Workflow job (AAP-run-job-by-name / AAP-watch-job-by-name) can read
-# them from $<step>.output without a separate SSH/API round trip - see
-# cw-workflows/Register-Concert-Kubernetes-Environment.yaml in the
-# optimized-solution repo, which consumes exactly these three keys.
+# ServiceAccount above/below on purpose.
+#
+# CORRECTION 2026-09-30: this used to bind the built-in "view" ClusterRole,
+# on the (wrong) assumption that it was the scope Concert's docs ask for.
+# IBM's actual documented minimum RBAC is a custom ClusterRole, NOT "view" -
+# https://www.ibm.com/docs/en/concert/3.0.x?topic=discovery-kubernetes-prerequisites
+# ("Kubernetes prerequisites"). That page states plainly: "If the account
+# does not have sufficient privileges, Concert cannot collect all relevant
+# resources. This results in incomplete topology data and an artificially
+# high (perfect) compliance and resilience score." - exactly the symptom we
+# saw (environment registered, host count populated, but 0 deployments).
+# Live-confirmed against this project's OCP cluster on 2026-09-30: with
+# "view", Concert's ingestion logs showed "forbidden" for nodes/secrets/
+# roles/rolebindings/clusterroles/clusterrolebindings, and the environment
+# showed 11 deployments; switching that same ServiceAccount to the
+# ClusterRole below (rules copied verbatim from the IBM doc, minus the two
+# OpenShift-only apiGroups - authorization.openshift.io and
+# apps.openshift.io - since a k3s cluster doesn't have those) made every one
+# of those "forbidden" errors disappear and raised the same cluster's
+# reported deployment count to 227.
 #
 # No ignore_errors here on purpose: the user wants to actually test this run,
 # not have failures silently swallowed. Watch this step on the first live run.
 - name: Create read-only ServiceAccount for Concert environment registration
   ansible.builtin.shell: |
     kubectl create serviceaccount concert-environment-reader -n kube-system --dry-run=client -o yaml | kubectl apply -f -
-    kubectl create clusterrolebinding concert-environment-reader-view --clusterrole=view --serviceaccount=kube-system:concert-environment-reader --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Apply IBM's documented minimum RBAC for Concert's Kubernetes discovery
+  ansible.builtin.shell: |
+    kubectl apply -f - <<'EOF'
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: concert-environment-reader-role
+    rules:
+      - apiGroups: [""]
+        resources: ["pods","services","endpoints","nodes","configmaps","secrets","namespaces","replicationcontrollers","limitranges","resourcequotas","events","serviceaccounts"]
+        verbs: ["get","list","watch"]
+      - apiGroups: [""]
+        resources: ["pods/log"]
+        verbs: ["get"]
+      - apiGroups: ["apps"]
+        resources: ["deployments","statefulsets","daemonsets","replicasets"]
+        verbs: ["get","list","watch"]
+      - apiGroups: ["batch"]
+        resources: ["cronjobs","jobs"]
+        verbs: ["get","list","watch"]
+      - apiGroups: ["networking.k8s.io"]
+        resources: ["ingresses","networkpolicies"]
+        verbs: ["get","list","watch"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["roles","rolebindings","clusterroles","clusterrolebindings"]
+        verbs: ["get","list","watch"]
+      - apiGroups: ["metrics.k8s.io"]
+        resources: ["pods"]
+        verbs: ["get","list"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: concert-environment-reader-binding
+    subjects:
+      - kind: ServiceAccount
+        name: concert-environment-reader
+        namespace: kube-system
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: concert-environment-reader-role
+    EOF
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
