@@ -133,6 +133,9 @@
       k3s_endpoint: "https://{{ ec2_public_ip.stdout }}:6443"
       k3s_token: "{{ concert_sa_token.stdout }}"
       cluster_name: "{{ instana_cluster_name }}"
+      # Namespace the demo app is deployed into - Concert's native discovery
+      # scans exactly this namespace (k8_components "namespaces").
+      app_namespace: "{{ app_namespace }}"
   no_log: true
 
 - name: Install MetalLB via Helm
