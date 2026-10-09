@@ -14,4 +14,4 @@
   become: true
 
   roles:
-    - ria-demo
+    - concert-demo

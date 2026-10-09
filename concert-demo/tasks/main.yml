@@ -1,6 +1,6 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# tasks file for ria-demo
+# tasks file for concert-demo
 - name: Install dependencies
   ansible.builtin.include_tasks:
     file: setup_deps.yaml

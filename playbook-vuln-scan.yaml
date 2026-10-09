@@ -19,5 +19,5 @@
   tasks:
     - name: Run the host vulnerability scan
       ansible.builtin.include_role:
-        name: ria-demo
+        name: concert-demo
         tasks_from: setup_vuln_scan.yaml
