@@ -1,0 +1,110 @@
+# Host vulnerability scan for IBM Concert (vm_scan)
+# =================================================
+# Scans this VM's OS packages with Trivy and converts the report to the Nessus
+# JSON format that Concert's vm_scan mapper reads (Concert picks the mapper by
+# scanner_name; there is no Trivy mapper for vm_scan, only nessus,
+# aws_inspector and qualys).
+#
+# Concert matches a scan to a host via dnsName == infrastructure component
+# reference_id, which for a k3s node is the Kubernetes node name. So the name
+# comes from `kubectl get nodes`, not from the Linux hostname.
+#
+# The upload (vuln_scan_upload.yaml) only runs when concert_url and
+# concert_api_key are given. At deploy time they are not, and the host does not
+# exist in Concert yet (discovery happens after this job returns), so the
+# deploy run only scans; the Concert Workflow re-runs this file with the
+# Concert variables after discovery and on a schedule.
+
+- name: Map architecture to the Trivy release asset suffix
+  ansible.builtin.set_fact:
+    trivy_asset_arch: "{{ {'x86_64': '64bit', 'aarch64': 'ARM64'}[ansible_architecture] }}"
+
+- name: Download Trivy release (checksum verified)
+  ansible.builtin.get_url:
+    url: "https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_Linux-{{ trivy_asset_arch }}.tar.gz"
+    checksum: "sha256:https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_checksums.txt"
+    dest: "/tmp/trivy_{{ trivy_version }}_{{ trivy_asset_arch }}.tar.gz"
+    mode: "0644"
+  register: trivy_download
+  retries: 3
+  delay: 10
+  until: trivy_download is succeeded
+
+- name: Install Trivy binary
+  ansible.builtin.unarchive:
+    src: "/tmp/trivy_{{ trivy_version }}_{{ trivy_asset_arch }}.tar.gz"
+    dest: /usr/local/bin
+    include: [trivy]
+    remote_src: true
+    mode: "0755"
+  args:
+    creates: "/usr/local/bin/trivy"
+
+- name: Resolve the host name Concert knows (Kubernetes node name)
+  ansible.builtin.shell: kubectl get nodes -o jsonpath='{.items[0].metadata.name}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: vuln_scan_node
+  changed_when: false
+  when: vuln_scan_hostname | length == 0
+
+- name: Set scan host name
+  ansible.builtin.set_fact:
+    vuln_scan_host: "{{ vuln_scan_hostname if vuln_scan_hostname | length > 0 else vuln_scan_node.stdout }}"
+
+- name: Create scan work directory
+  ansible.builtin.file:
+    path: "{{ vuln_scan_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Install the Trivy to Nessus converter
+  ansible.builtin.copy:
+    src: vuln-scan/trivy_to_nessus.py
+    dest: "{{ vuln_scan_dir }}/trivy_to_nessus.py"
+    mode: "0755"
+
+# k3s images and kubelet data are container layers, not host packages; the
+# image CVEs are covered by Concert's own Trivy discovery.
+- name: Scan the host OS packages with Trivy
+  ansible.builtin.command: >-
+    trivy rootfs --scanners vuln --pkg-types os --format json --quiet
+    --skip-dirs /var/lib/rancher --skip-dirs /var/lib/kubelet
+    --skip-dirs /var/lib/containerd --skip-dirs {{ vuln_scan_dir }}
+    --output {{ vuln_scan_dir }}/trivy.json /
+  register: vuln_scan_trivy
+  retries: 3
+  delay: 20
+  until: vuln_scan_trivy.rc == 0
+  changed_when: true
+
+- name: Convert the Trivy report to Concert vm_scan input
+  ansible.builtin.command: >-
+    python3 {{ vuln_scan_dir }}/trivy_to_nessus.py
+    --trivy {{ vuln_scan_dir }}/trivy.json
+    --hostname {{ vuln_scan_host | quote }}
+    --ip {{ (ansible_default_ipv4.address | default('')) | quote }}
+    --os-name {{ (ansible_distribution ~ ' ' ~ ansible_distribution_version) | quote }}
+    --out {{ vuln_scan_dir }}/vm_scan.json
+  changed_when: true
+
+- name: Read the converted scan
+  ansible.builtin.slurp:
+    src: "{{ vuln_scan_dir }}/vm_scan.json"
+  register: vuln_scan_file
+
+- name: Count the scanned CVEs
+  ansible.builtin.set_fact:
+    vuln_scan_cve_count: "{{ (vuln_scan_file.content | b64decode | from_json) | map(attribute='cve') | unique | list | length }}"
+
+- name: Publish scan summary as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      vuln_scan_node_name: "{{ vuln_scan_host }}"
+      vuln_scan_cve_count: "{{ vuln_scan_cve_count }}"
+
+- name: Upload the scan to Concert
+  ansible.builtin.include_tasks: vuln_scan_upload.yaml
+  when:
+    - concert_url | length > 0
+    - concert_api_key | length > 0

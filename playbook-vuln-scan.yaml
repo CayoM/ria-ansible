@@ -1,0 +1,23 @@
+# Re-scan one VM and upload the result to IBM Concert (vm_scan).
+# Used by the Concert Workflows: after a new VM was discovered, and on a schedule
+# so that fixed CVEs close in Concert. Required extra vars: ec2_ip, remote_user,
+# concert_url, concert_api_key.
+- name: Add host dynamically
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add the scan target
+      ansible.builtin.add_host:
+        name: ec2_target
+        ansible_host: "{{ ec2_ip }}"
+        ansible_user: "{{ remote_user }}"
+        groups: ec2_dynamic_group
+
+- name: Scan the host and upload to Concert
+  hosts: ec2_dynamic_group
+  become: true
+  tasks:
+    - name: Run the host vulnerability scan
+      ansible.builtin.include_role:
+        name: ria-demo
+        tasks_from: setup_vuln_scan.yaml

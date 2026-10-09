@@ -105,3 +105,15 @@
   tags:
     - camera
 ###################################################
+
+################# Host Vulnerability Scan #########
+- name: Include Host Vulnerability Scan (Concert vm_scan)
+  when: feature_vuln_scan | bool
+  ansible.builtin.include_tasks:
+    file: setup_vuln_scan.yaml
+    apply:
+      tags:
+        - vuln_scan
+  tags:
+    - vuln_scan
+###################################################

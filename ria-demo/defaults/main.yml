@@ -7,6 +7,14 @@ feature_instana: true
 feature_sevone: true
 ###############################
 
+# Host vulnerability scan (Trivy rootfs -> Concert vm_scan), see tasks/setup_vuln_scan.yaml
+feature_vuln_scan: true
+trivy_version: "0.75.0"
+vuln_scan_dir: /var/lib/ria-vuln-scan
+vuln_scan_hostname: ""     # empty = Kubernetes node name (what Concert knows the host as)
+concert_url: ""            # https://<concert route>; empty = scan only, no upload
+concert_api_key: ""
+
 guard_cloud_init: true
 
 # Pinned instead of "stable" (resolved via update.k3s.io) to avoid depending on

@@ -1,0 +1,45 @@
+# Upload {{ vuln_scan_dir }}/vm_scan.json to IBM Concert as a vm_scan.
+# Concert re-evaluates the host on every upload: CVEs missing from the new
+# scan are closed, so a re-run after a fix shows the fixed state.
+#
+# curl instead of ansible.builtin.uri on purpose, both attempts failed live:
+#  - uri form-multipart base64-encodes a file part -> Concert's pipeline fails
+#    with "Expecting value: line 1 column 1".
+#  - passing the JSON as `content` -> Jinja turns the JSON text back into a
+#    Python list, so Concert receives `[{'cve': ...` ("Expecting property name
+#    enclosed in double quotes").
+#
+# The API key goes in via stdin (curl --config -) so it never shows in the
+# process list. --insecure because Concert's gateway serves a self-signed
+# certificate (same convention as the optimized-solution Concert tasks).
+
+- name: Upload vm_scan to Concert
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --insecure
+      - --output
+      - /dev/null
+      - --write-out
+      - "%{http_code}"
+      - --config
+      - "-"
+      - --form
+      - "data_type=vm_scan"
+      - --form
+      - "filename=@{{ vuln_scan_dir }}/vm_scan.json;type=application/json"
+      - --form-string
+      - "metadata={{ {'scanner_name': 'nessus', 'scan_date': ansible_date_time.epoch} | to_json }}"
+      - "{{ concert_url }}/ingestion/api/v1/upload_files"
+    stdin: |
+      header = "InstanceId: 0000-0000-0000-0000"
+      header = "Authorization: C_API_KEY {{ concert_api_key }}"
+  register: vuln_scan_upload
+  retries: 3
+  delay: 10
+  until: vuln_scan_upload.stdout | default('') == '202'
+  changed_when: vuln_scan_upload.stdout | default('') == '202'
+  failed_when: vuln_scan_upload.stdout | default('') != '202'
+  no_log: true
