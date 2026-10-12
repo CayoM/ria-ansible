@@ -1,0 +1,132 @@
+# Dynamic scan (DAST) with OWASP ZAP, uploaded to IBM Concert as dynamic_scan.
+# ===========================================================================
+# Runs on localhost in the AWX job pod. ZAP itself runs as a service in the cluster
+# (optimized-solution: tasks/install_zap.yml) and is driven through its API. ZAP is a
+# proxy: the job sends its API calls through it to the pseudo host "zap", the scan
+# target is requested by ZAP from outside the VM (spider + passive scan only, no attacks).
+#
+# What Concert does with the upload (read in the pipeline source of 3.0.1.1,
+# exposlib/exposure_handler.py): env_name and access_point_name are mandatory; each
+# site of the ZAP report becomes an access point of that environment, created by the
+# upload itself, and its findings hang on the access point (Environment > Access points
+# > DAST exposures). Kubernetes discovery does not create one for the k3s demo VMs.
+#
+# Inputs: dast_target_url (e.g. http://web.<ip>.nip.io), dast_env_name (the Concert
+# environment, = deployment id), concert_url, concert_api_key.
+
+- name: Check the required inputs
+  ansible.builtin.assert:
+    that:
+      - dast_target_url | length > 0
+      - dast_env_name | length > 0
+      - concert_url | length > 0
+      - concert_api_key | length > 0
+    fail_msg: "dast_target_url, dast_env_name, concert_url and concert_api_key are required"
+
+- name: Derive the ZAP site name of the target
+  ansible.builtin.set_fact:
+    dast_site: "{{ dast_target_url | regex_replace('^(https?://[^/]+).*$', '\\1') }}"
+
+- name: Start with a clean scan directory
+  ansible.builtin.file:
+    path: "{{ dast_dir }}"
+    state: absent
+
+- name: Create the scan directory
+  ansible.builtin.file:
+    path: "{{ dast_dir }}"
+    state: directory
+    mode: "0750"
+
+# The target must answer at all (any HTTP status): a dead VM must not produce an
+# empty scan that would close the environment's findings in Concert.
+- name: Check that the target answers
+  ansible.builtin.uri:
+    url: "{{ dast_target_url }}"
+    follow_redirects: none
+    status_code: [200, 204, 301, 302, 401, 403, 404]
+    timeout: 15
+  register: dast_target_check
+  retries: 3
+  delay: 10
+  until: dast_target_check.status is defined and dast_target_check.status > 0
+
+- name: Wait until ZAP answers
+  ansible.builtin.uri:
+    url: http://zap/JSON/core/view/version/
+    return_content: true
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+  register: dast_zap_version
+  retries: 20
+  delay: 6
+  until: dast_zap_version.status | default(0) == 200
+
+- name: Start a fresh ZAP session
+  ansible.builtin.uri:
+    url: http://zap/JSON/core/action/newSession/?name=dast&overwrite=true
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+
+- name: Spider the target
+  ansible.builtin.uri:
+    url: "http://zap/JSON/spider/action/scan/?{{ {'url': dast_target_url, 'recurse': 'true', 'maxChildren': dast_spider_max_children} | urlencode }}"
+    return_content: true
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+  register: dast_spider
+
+- name: Wait for the spider to finish
+  ansible.builtin.uri:
+    url: "http://zap/JSON/spider/view/status/?scanId={{ dast_spider.json.scan }}"
+    return_content: true
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+  register: dast_spider_status
+  retries: 60
+  delay: 3
+  until: dast_spider_status.json.status | default('') == '100'
+
+# The passive rules run on everything the spider fetched; wait for the queue.
+- name: Wait for the passive scan to finish
+  ansible.builtin.uri:
+    url: http://zap/JSON/pscan/view/recordsToScan/
+    return_content: true
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+  register: dast_pscan
+  retries: 60
+  delay: 3
+  until: dast_pscan.json.recordsToScan | default('') == '0'
+
+- name: Download the JSON report
+  ansible.builtin.uri:
+    url: http://zap/OTHER/core/other/jsonreport/
+    dest: "{{ dast_dir }}/zap-raw.json"
+    mode: "0640"
+  environment:
+    http_proxy: "{{ dast_zap_proxy }}"
+
+- name: Keep only the target in the report
+  ansible.builtin.include_tasks: dast_filter_report.yaml
+  vars:
+    dast_raw_report: "{{ dast_dir }}/zap-raw.json"
+    dast_filtered_report: "{{ dast_dir }}/zap-report.json"
+
+- name: Publish the scan summary as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      dast_site: "{{ dast_site }}"
+      dast_alert_count: "{{ dast_alert_count }}"
+      dast_instance_count: "{{ dast_instance_count }}"
+
+- name: Upload the dynamic scan to Concert
+  ansible.builtin.include_tasks: concert_upload.yaml
+  vars:
+    upload_data_type: dynamic_scan
+    upload_file: "{{ dast_dir }}/zap-report.json"
+    upload_metadata:
+      env_name: "{{ dast_env_name }}"
+      access_point_name: "{{ dast_access_point_name }}"
+      scanner_name: zap
+      scan_date: "{{ ansible_date_time.epoch }}"

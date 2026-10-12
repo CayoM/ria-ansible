@@ -31,6 +31,14 @@ sast_repos:                        # app -> source repository; an app without an
 sast_repo_url: ""                  # set to override the repository from sast_repos
 sast_force: false                  # true: scan even if Concert already holds a scan of this repository
 
+# Dynamic scan (OWASP ZAP -> Concert dynamic_scan), see tasks/setup_dast_scan.yaml
+dast_dir: /tmp/concert-dast
+dast_zap_proxy: "http://zap.concert-dast.svc:8090"   # ZAP service (optimized-solution install_zap.yml)
+dast_access_point_name: "web"
+dast_spider_max_children: 50
+dast_target_url: ""                # e.g. http://web.<ip>.nip.io
+dast_env_name: ""                  # Concert environment (= deployment id)
+
 guard_cloud_init: true
 
 # Pinned instead of "stable" (resolved via update.k3s.io) to avoid depending on

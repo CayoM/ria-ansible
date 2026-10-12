@@ -1,0 +1,13 @@
+# Scan a demo VM's web application from outside with OWASP ZAP (spider + passive scan)
+# and upload the result to IBM Concert (dynamic_scan). Started by the AWX job template
+# scan-dast. Required extra vars: dast_target_url (http://web.<ip>.nip.io), dast_env_name
+# (the Concert environment = deployment id), concert_url, concert_api_key.
+- name: Dynamic scan (ZAP) and upload to Concert
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Run the dynamic scan
+      ansible.builtin.include_role:
+        name: concert-demo
+        tasks_from: setup_dast_scan.yaml

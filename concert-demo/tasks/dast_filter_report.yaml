@@ -1,0 +1,36 @@
+# Keep only the target's site in a ZAP JSON report.
+# ZAP lists every host it saw, including stray entries without alerts (seen live: an
+# empty "http://localhost:..." site from a mis-addressed API call). Concert turns each
+# site into an access point, so only the scanned target may stay.
+#
+# Inputs: dast_raw_report (path), dast_filtered_report (path), dast_site (e.g. http://web.1.2.3.4.nip.io)
+# Output facts: dast_alert_count, dast_instance_count
+
+- name: Read the raw ZAP report
+  ansible.builtin.slurp:
+    src: "{{ dast_raw_report }}"
+  register: dast_raw
+
+- name: Keep only the site of the target
+  ansible.builtin.set_fact:
+    dast_report: >-
+      {{ (dast_raw.content | b64decode | from_json)
+         | combine({'site': ((dast_raw.content | b64decode | from_json).site
+                             | selectattr('@name', 'equalto', dast_site) | list)}) }}
+
+- name: Fail when ZAP never saw the target
+  ansible.builtin.assert:
+    that:
+      - dast_report.site | length == 1
+    fail_msg: "ZAP report has no site '{{ dast_site }}': the target was not reached through ZAP"
+
+- name: Write the filtered report
+  ansible.builtin.copy:
+    content: "{{ dast_report | to_nice_json }}"
+    dest: "{{ dast_filtered_report }}"
+    mode: "0640"
+
+- name: Count alerts and instances
+  ansible.builtin.set_fact:
+    dast_alert_count: "{{ dast_report.site[0].alerts | length }}"
+    dast_instance_count: "{{ dast_report.site[0].alerts | map(attribute='instances') | map('length') | sum }}"
