@@ -61,7 +61,11 @@
     --config {{ sast_semgrep_config }}
     --sarif --output {{ sast_dir }}/semgrep-sarif.json
     --metrics off --quiet --disable-version-check
-    {{ sast_dir }}/src
+    .
+  args:
+    # scan from inside the clone so Concert shows repository paths (K8s/...), not the
+    # job pod's /tmp/... directory
+    chdir: "{{ sast_dir }}/src"
   environment:
     HOME: "{{ sast_dir }}"
   changed_when: true
