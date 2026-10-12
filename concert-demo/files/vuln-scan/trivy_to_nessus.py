@@ -11,6 +11,7 @@ Usage:
 """
 import argparse
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,11 +32,28 @@ def _v3_score(cvss):
     return None
 
 
+# datetime.fromisoformat only takes 3 or 6 fractional digits before Python 3.11 (Ubuntu
+# 22.04 has 3.10) but Trivy emits any length, so split the timestamp up ourselves.
+_ISO_TIMESTAMP = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
 def _epoch(iso):
+    """Epoch seconds as string; None if absent or unparsable (a bad date must not abort the scan)."""
     if not iso:
         return None
-    parsed = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-    return str(int(parsed.replace(tzinfo=parsed.tzinfo or timezone.utc).timestamp()))
+    match = _ISO_TIMESTAMP.match(iso.strip())
+    if not match:
+        return None
+    base, offset = match.groups()
+    parsed = datetime.strptime(base, "%Y-%m-%dT%H:%M:%S")
+    shift = 0
+    if offset and offset != "Z":
+        sign = -1 if offset[0] == "-" else 1
+        digits = offset[1:].replace(":", "")
+        shift = sign * (int(digits[:2]) * 3600 + int(digits[2:]) * 60)
+    return str(int(parsed.replace(tzinfo=timezone.utc).timestamp()) - shift)
 
 
 def _entry(vuln, hostname, ip, os_name, family, now):

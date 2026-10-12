@@ -92,5 +92,35 @@ class ConvertTest(unittest.TestCase):
             convert(TRIVY, hostname="", ip="1.1.1.1", os_name="x", now=1)
 
 
+class PublishedDateTest(unittest.TestCase):
+    """Trivy emits fractional seconds of any length; Ubuntu 22.04 ships Python 3.10
+    whose datetime.fromisoformat only accepts 3 or 6 digits (live failure 2026-10-12)."""
+
+    @staticmethod
+    def _pub(date):
+        vuln = {"VulnerabilityID": "CVE-2022-0001", "PkgName": "x", "Severity": "LOW", "PublishedDate": date}
+        out = convert({"Results": [{"Class": "os-pkgs", "Vulnerabilities": [vuln]}]},
+                      hostname="h", ip="", os_name="x", now=1)
+        return out[0]["vulnPubDate"]
+
+    def test_one_digit_fraction_with_offset(self):
+        self.assertEqual(self._pub("2022-03-26T13:15:07.9+00:00"), "1648300507")
+
+    def test_one_digit_fraction_with_z(self):
+        self.assertEqual(self._pub("2022-03-26T13:15:07.9Z"), "1648300507")
+
+    def test_nanosecond_fraction(self):
+        self.assertEqual(self._pub("2022-03-26T13:15:07.123456789Z"), "1648300507")
+
+    def test_no_fraction(self):
+        self.assertEqual(self._pub("2022-03-26T13:15:07Z"), "1648300507")
+
+    def test_non_utc_offset_is_converted(self):
+        self.assertEqual(self._pub("2022-03-26T15:15:07+02:00"), "1648300507")
+
+    def test_garbage_date_does_not_abort_the_scan(self):
+        self.assertIsNone(self._pub("not-a-date"))
+
+
 if __name__ == "__main__":
     unittest.main()
