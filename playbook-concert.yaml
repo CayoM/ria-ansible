@@ -12,6 +12,20 @@
 - name: Setup Super Demo
   hosts: ec2_dynamic_group
   become: true
+  # The job is launched by Terraform right after the instance is created, while the VM is
+  # still booting: "ssh: connect to host ... port 22: Connection refused" (seen 2026-10-12).
+  # Wait for SSH first, and only then gather facts.
+  gather_facts: false
+
+  pre_tasks:
+    - name: Wait until the VM accepts SSH connections
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        sleep: 10
+        timeout: 600
+
+    - name: Gather facts
+      ansible.builtin.setup:
 
   roles:
     - concert-demo
