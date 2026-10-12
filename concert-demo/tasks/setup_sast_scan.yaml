@@ -52,12 +52,14 @@
   register: sast_branch
   changed_when: false
 
+# The report is named *.json on purpose: the upload endpoint accepts csv, json, xlsx, xls,
+# yaml and xml only (API contract), a *.sarif file is answered with "Unsupported file type".
 # HOME must be writable (Semgrep keeps its cache and settings there), metrics stay off.
 - name: Scan the source with Semgrep
   ansible.builtin.command: >-
     {{ sast_dir }}/venv/bin/semgrep scan
     --config {{ sast_semgrep_config }}
-    --sarif --output {{ sast_dir }}/semgrep.sarif
+    --sarif --output {{ sast_dir }}/semgrep-sarif.json
     --metrics off --quiet --disable-version-check
     {{ sast_dir }}/src
   environment:
@@ -66,7 +68,7 @@
 
 - name: Read the SARIF report
   ansible.builtin.slurp:
-    src: "{{ sast_dir }}/semgrep.sarif"
+    src: "{{ sast_dir }}/semgrep-sarif.json"
   register: sast_sarif
 
 - name: Count the findings
@@ -84,7 +86,7 @@
   ansible.builtin.include_tasks: concert_upload.yaml
   vars:
     upload_data_type: static_code_scan
-    upload_file: "{{ sast_dir }}/semgrep.sarif"
+    upload_file: "{{ sast_dir }}/semgrep-sarif.json"
     upload_metadata:
       repo_name: "{{ sast_repo_name }}"
       repo_url: "{{ sast_repo_url }}"
