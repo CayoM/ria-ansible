@@ -163,7 +163,21 @@
   delay: 6
   until: metallb_webhook.stdout != ""
   changed_when: false
-  
+
+# An endpoint IP only proves the pod is Ready (health port); the webhook server on
+# 9443 starts a little later. Applying IPAddressPool/L2Advertisement in that gap
+# fails with "failed calling webhook ... 502 Bad Gateway" (seen live on 2026-10-12).
+- name: Wait until the MetalLB controller deployment is available
+  ansible.builtin.shell: |
+    kubectl rollout status deployment/metallb-controller -n metallb-system --timeout=120s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: metallb_controller
+  retries: 3
+  delay: 10
+  until: metallb_controller.rc == 0
+  changed_when: false
+
 - name: Apply MetalLB Resources (IP Pool)
   ansible.builtin.shell: |
     kubectl apply -n metallb-system -f - <<EOF
@@ -179,6 +193,10 @@
     EOF
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: metallb_ip_pool
+  retries: 12          # webhook may need up to ~2 minutes after the pod is Ready
+  delay: 10
+  until: metallb_ip_pool.rc == 0
 
 - name: Apply MetalLB Resources (Advert)
   ansible.builtin.shell: |
@@ -194,6 +212,10 @@
     EOF
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: metallb_l2_advert
+  retries: 12
+  delay: 10
+  until: metallb_l2_advert.rc == 0
 
 - name: Create MetalLB Role
   ansible.builtin.shell: |
