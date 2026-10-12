@@ -122,5 +122,44 @@ class PublishedDateTest(unittest.TestCase):
         self.assertIsNone(self._pub("not-a-date"))
 
 
+class MergePerCveTest(unittest.TestCase):
+    """Concert merges findings per CVE anyway (the Nessus mapper has no package field), and
+    22,814 entries for 5,151 CVEs made its scan processing run for over 15 minutes.
+    One entry per CVE is lossless for Concert and keeps the upload small."""
+
+    VULNS = [
+        {"VulnerabilityID": "CVE-2024-0001", "PkgName": "libssl3", "InstalledVersion": "3.0.1", "FixedVersion": "3.0.2",
+         "Severity": "MEDIUM", "CVSS": {"nvd": {"V3Score": 5.5}}},
+        {"VulnerabilityID": "CVE-2024-0001", "PkgName": "openssl", "InstalledVersion": "3.0.1", "FixedVersion": "3.0.2",
+         "Severity": "HIGH", "CVSS": {"nvd": {"V3Score": 7.5}}},
+        {"VulnerabilityID": "CVE-2024-0001", "PkgName": "libssl-dev", "InstalledVersion": "3.0.1",
+         "Severity": "MEDIUM"},
+        {"VulnerabilityID": "CVE-2024-0002", "PkgName": "curl", "InstalledVersion": "7.0", "Severity": "LOW"},
+    ]
+
+    def setUp(self):
+        trivy = {"Results": [{"Class": "os-pkgs", "Vulnerabilities": self.VULNS}]}
+        self.out = convert(trivy, hostname="h", ip="", os_name="x", now=1)
+        self.by_cve = {e["cve"]: e for e in self.out}
+
+    def test_one_entry_per_cve(self):
+        self.assertEqual(sorted(self.by_cve), ["CVE-2024-0001", "CVE-2024-0002"])
+        self.assertEqual(len(self.out), 2)
+
+    def test_keeps_the_highest_cvss_and_matching_severity(self):
+        entry = self.by_cve["CVE-2024-0001"]
+        self.assertEqual(entry["cvssV3BaseScore"], 7.5)
+        self.assertEqual(entry["severity"], {"name": "High"})
+
+    def test_lists_all_affected_packages(self):
+        self.assertEqual(self.by_cve["CVE-2024-0001"]["pluginName"], "libssl3, openssl, libssl-dev")
+
+    def test_solution_comes_from_a_package_that_has_a_fix(self):
+        self.assertIn("3.0.2", self.by_cve["CVE-2024-0001"]["solution"])
+
+    def test_order_follows_first_appearance(self):
+        self.assertEqual([e["cve"] for e in self.out], ["CVE-2024-0001", "CVE-2024-0002"])
+
+
 if __name__ == "__main__":
     unittest.main()

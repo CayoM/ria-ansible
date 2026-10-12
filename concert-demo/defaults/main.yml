@@ -11,6 +11,10 @@ feature_sevone: true
 feature_vuln_scan: true
 trivy_version: "0.75.0"
 vuln_scan_dir: /var/lib/concert-vuln-scan
+# Concert processes an upload slowly when it is large: 22,814 entries for 5,151 CVEs kept
+# its scan job busy for over 15 minutes. Report what can be acted on.
+vuln_scan_severities: "CRITICAL,HIGH,MEDIUM"
+vuln_scan_ignore_unfixed: true   # only CVEs that have a fixed version
 vuln_scan_hostname: ""     # empty = Kubernetes node name (what Concert knows the host as)
 concert_url: ""            # https://<concert route>; empty = scan only, no upload
 concert_api_key: ""

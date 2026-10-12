@@ -82,13 +82,35 @@ def _entry(vuln, hostname, ip, os_name, family, now):
     }
 
 
+def _rank(vuln):
+    """Higher is worse; used to pick the entry that represents a CVE."""
+    score = _v3_score(vuln.get("CVSS"))
+    return score if score is not None else -1.0
+
+
+def _merge(entries, vulns):
+    """Fold the per-package entries of one CVE into one: worst entry wins, packages are
+    listed, and the solution comes from a package that has a fix."""
+    worst_index = max(range(len(vulns)), key=lambda i: (_rank(vulns[i]), -i))
+    merged = dict(entries[worst_index])
+    merged["pluginName"] = ", ".join(e["pluginName"] for e in entries)
+    fixed = next((e for e, v in zip(entries, vulns) if v.get("FixedVersion")), None)
+    if fixed:
+        merged["solution"] = fixed["solution"]
+    return merged
+
+
 def convert(trivy, hostname, ip, os_name, now=None):
-    """Return the Nessus-format list for one host; deduped per (CVE, package)."""
+    """Return the Nessus-format list for one host: one entry per CVE.
+
+    Concert's Nessus mapper has no package field and merges findings per CVE, so
+    folding the per-package rows here loses nothing and keeps the upload small.
+    """
     if not hostname:
         raise ValueError("hostname is required: it must equal the Concert host reference_id")
     now = int(time.time()) if now is None else now
+    per_cve = {}  # insertion-ordered: first appearance of a CVE fixes its position
     seen = set()
-    entries = []
     for result in trivy.get("Results", []):
         family = result.get("Class", "os-pkgs")
         for vuln in result.get("Vulnerabilities", []):
@@ -97,8 +119,10 @@ def convert(trivy, hostname, ip, os_name, now=None):
             if not cve.startswith("CVE-") or key in seen:
                 continue
             seen.add(key)
+            entries, vulns = per_cve.setdefault(cve, ([], []))
             entries.append(_entry(vuln, hostname, ip, os_name, family, now))
-    return entries
+            vulns.append(vuln)
+    return [_merge(entries, vulns) for entries, vulns in per_cve.values()]
 
 
 def main(argv=None):

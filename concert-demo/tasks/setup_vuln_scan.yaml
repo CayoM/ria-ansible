@@ -69,6 +69,8 @@
 - name: Scan the host OS packages with Trivy
   ansible.builtin.command: >-
     trivy rootfs --scanners vuln --pkg-types os --format json --quiet
+    --severity {{ vuln_scan_severities }}
+    {{ '--ignore-unfixed' if vuln_scan_ignore_unfixed | bool else '' }}
     --skip-dirs /var/lib/rancher --skip-dirs /var/lib/kubelet
     --skip-dirs /var/lib/containerd --skip-dirs {{ vuln_scan_dir }}
     --output {{ vuln_scan_dir }}/trivy.json /
