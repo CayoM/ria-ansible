@@ -57,7 +57,11 @@
           # k3s nutzt Traefik; falls keine Default-IngressClass gesetzt ist, explizit angeben:
           ingressClassName: traefik
           rules:
-            - http:
+            # A host name makes the ingress an exposed endpoint that Concert can model
+            # (nip.io resolves <name>.<ip>.nip.io to <ip>, no DNS setup needed). The same
+            # name is the target for external scans.
+            - host: web.{{ ec2_public_ip.stdout }}.nip.io
+              http:
                 paths:
                   - path: /
                     pathType: Prefix
@@ -157,7 +161,11 @@
           # k3s nutzt Traefik; falls keine Default-IngressClass gesetzt ist, explizit angeben:
           ingressClassName: traefik
           rules:
-            - http:
+            # A host name makes the ingress an exposed endpoint that Concert can model
+            # (nip.io resolves <name>.<ip>.nip.io to <ip>, no DNS setup needed). The same
+            # name is the target for external scans.
+            - host: web.{{ ec2_public_ip.stdout }}.nip.io
+              http:
                 paths:
                   - path: /
                     pathType: Prefix
