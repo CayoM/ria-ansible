@@ -12,16 +12,31 @@
 # and per result ruleId, message.text and locations[].physicalLocation.artifactLocation.uri;
 # Semgrep's SARIF does.
 #
-# Inputs: sast_application_name (required), concert_url, concert_api_key.
+# Inputs: sast_application_name, sast_app_name (or sast_repo_url), concert_url, concert_api_key.
+# sast_decide.yaml first decides whether anything has to run (no repository known for the
+# app, or already scanned), see there.
 
 - name: Check the required inputs
   ansible.builtin.assert:
     that:
       - sast_application_name | length > 0
-      - sast_repo_url | length > 0
+      - sast_app_name | length > 0 or sast_repo_url | length > 0
       - concert_url | length > 0
       - concert_api_key | length > 0
-    fail_msg: "sast_application_name, sast_repo_url, concert_url and concert_api_key are required"
+    fail_msg: "sast_application_name, sast_app_name (or sast_repo_url), concert_url and concert_api_key are required"
+
+- name: Decide whether the code scan has to run
+  ansible.builtin.include_tasks: sast_decide.yaml
+
+- name: Publish the decision when there is nothing to scan
+  ansible.builtin.set_stats:
+    data:
+      sast_decision: "{{ sast_decision }}"
+  when: sast_decision != 'scan'
+
+- name: Stop here when there is nothing to scan
+  ansible.builtin.meta: end_play
+  when: sast_decision != 'scan'
 
 - name: Start with a clean scan directory
   ansible.builtin.file:
@@ -42,7 +57,7 @@
 
 - name: Clone the source repository
   ansible.builtin.git:
-    repo: "{{ sast_repo_url }}"
+    repo: "{{ sast_effective_repo_url }}"
     dest: "{{ sast_dir }}/src"
     depth: 1
   register: sast_clone
@@ -82,9 +97,10 @@
 - name: Publish the scan summary as job artifacts
   ansible.builtin.set_stats:
     data:
-      sast_repo_name: "{{ sast_repo_name }}"
+      sast_repo_name: "{{ sast_effective_repo_name }}"
       sast_commit_sha: "{{ sast_clone.after }}"
       sast_finding_count: "{{ sast_finding_count }}"
+      sast_decision: scan
 
 - name: Upload the code scan to Concert
   ansible.builtin.include_tasks: concert_upload.yaml
@@ -92,8 +108,8 @@
     upload_data_type: static_code_scan
     upload_file: "{{ sast_dir }}/semgrep-sarif.json"
     upload_metadata:
-      repo_name: "{{ sast_repo_name }}"
-      repo_url: "{{ sast_repo_url }}"
+      repo_name: "{{ sast_effective_repo_name }}"
+      repo_url: "{{ sast_effective_repo_url }}"
       commit_sha: "{{ sast_clone.after }}"
       branch: "{{ sast_branch.stdout }}"
       application_name: "{{ sast_application_name }}"

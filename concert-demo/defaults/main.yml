@@ -25,8 +25,11 @@ sast_semgrep_version: "1.136.0"
 sast_semgrep_config: "p/default"   # rule pack from the Semgrep registry (needs access to semgrep.dev)
 sast_application_name: ""          # Concert application to attach the repository to (required)
 sast_application_version: "1.0.0"
-sast_repo_url: "{{ robotshop_git_repo }}"
-sast_repo_name: "{{ sast_repo_url | basename | regex_replace('\\.git$', '') }}"
+sast_app_name: ""                  # demo app (robotshop, qotd, ...), picks the repository from sast_repos
+sast_repos:                        # app -> source repository; an app without an entry is skipped
+  robotshop: "{{ robotshop_git_repo }}"
+sast_repo_url: ""                  # set to override the repository from sast_repos
+sast_force: false                  # true: scan even if Concert already holds a scan of this repository
 
 guard_cloud_init: true
 

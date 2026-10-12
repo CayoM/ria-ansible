@@ -1,0 +1,49 @@
+# Decide whether a code scan has to run for this application.
+# Output fact sast_decision: scan | skip_no_repo | skip_already_scanned
+#
+# The repository of an application is known here (sast_repos), not in the Concert
+# Workflow that starts the job: one place to maintain. An application without an entry
+# is skipped, not failed. Concert is asked read-only (GET /ingestion/api/v1/exposure_assessments,
+# filtered by application and repository, tested live): any assessment means the code was
+# scanned already. sast_force: true scans anyway, which the scheduled refresh uses.
+# Concert does not tell which commit was scanned, so a changed repository is only picked
+# up by a forced run.
+
+- name: Resolve the repository of the application
+  ansible.builtin.set_fact:
+    sast_effective_repo_url: "{{ sast_repo_url if sast_repo_url | length > 0 else (sast_repos[sast_app_name] | default('')) }}"
+
+- name: Derive the repository name
+  ansible.builtin.set_fact:
+    sast_effective_repo_name: "{{ sast_effective_repo_url | basename | regex_replace('\\.git$', '') }}"
+
+- name: Ask Concert whether this application was scanned already
+  ansible.builtin.uri:
+    url: >-
+      {{ concert_url }}/ingestion/api/v1/exposure_assessments?{{
+        {'application_name': sast_application_name, 'repo_url': sast_effective_repo_url, 'page_size': 1} | urlencode }}
+    method: GET
+    headers:
+      InstanceId: "0000-0000-0000-0000"
+      Authorization: "C_API_KEY {{ concert_api_key }}"
+    validate_certs: false
+    return_content: true
+    status_code: 200
+  register: sast_existing
+  when:
+    - sast_effective_repo_url | length > 0
+    - not (sast_force | bool)
+  no_log: true
+
+- name: Decide
+  ansible.builtin.set_fact:
+    sast_decision: >-
+      {{ 'skip_no_repo' if sast_effective_repo_url | length == 0
+         else ('skip_already_scanned'
+               if (not (sast_force | bool))
+                  and (((sast_existing.json | default({})).exposure_assessments | default([])) | length > 0)
+               else 'scan') }}
+
+- name: Report the decision
+  ansible.builtin.debug:
+    msg: "Code scan for {{ sast_application_name }} (repository '{{ sast_effective_repo_url | default('') }}'): {{ sast_decision }}"
