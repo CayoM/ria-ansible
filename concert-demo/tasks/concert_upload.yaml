@@ -19,33 +19,50 @@
 # certificate (same convention as the optimized-solution Concert tasks).
 # A 202 only means "accepted"; Concert processes the file asynchronously.
 
+# Concert's answer goes to a file so that a rejected upload can say why (the curl task
+# itself stays no_log because its stdin carries the API key).
 - name: "Upload {{ upload_data_type }} to Concert"
-  ansible.builtin.command:
-    argv:
-      - curl
-      - --silent
-      - --show-error
-      - --insecure
-      - --output
-      - /dev/null
-      - --write-out
-      - "%{http_code}"
-      - --config
-      - "-"
-      - --form
-      - "data_type={{ upload_data_type }}"
-      - --form
-      - "filename=@{{ upload_file }};type=application/json"
-      - --form-string
-      - "metadata={{ upload_metadata | to_json }}"
-      - "{{ concert_url }}/ingestion/api/v1/upload_files"
-    stdin: |
-      header = "InstanceId: 0000-0000-0000-0000"
-      header = "Authorization: C_API_KEY {{ concert_api_key }}"
-  register: concert_upload
-  retries: 3
-  delay: 10
-  until: concert_upload.stdout | default('') == '202'
-  changed_when: concert_upload.stdout | default('') == '202'
-  failed_when: concert_upload.stdout | default('') != '202'
-  no_log: true
+  block:
+    - name: "Send the {{ upload_data_type }} file"
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --silent
+          - --show-error
+          - --insecure
+          - --output
+          - "/tmp/concert-upload-{{ upload_data_type }}.response"
+          - --write-out
+          - "%{http_code}"
+          - --config
+          - "-"
+          - --form
+          - "data_type={{ upload_data_type }}"
+          - --form
+          - "filename=@{{ upload_file }};type=application/json"
+          - --form-string
+          - "metadata={{ upload_metadata | to_json }}"
+          - "{{ concert_url }}/ingestion/api/v1/upload_files"
+        stdin: |
+          header = "InstanceId: 0000-0000-0000-0000"
+          header = "Authorization: C_API_KEY {{ concert_api_key }}"
+      register: concert_upload
+      retries: 3
+      delay: 10
+      until: concert_upload.stdout | default('') == '202'
+      changed_when: concert_upload.stdout | default('') == '202'
+      failed_when: concert_upload.stdout | default('') != '202'
+      no_log: true
+  rescue:
+    - name: Read Concert's answer
+      ansible.builtin.slurp:
+        src: "/tmp/concert-upload-{{ upload_data_type }}.response"
+      register: concert_upload_answer
+      failed_when: false
+
+    - name: Report why Concert rejected the upload
+      ansible.builtin.fail:
+        msg: >-
+          Concert rejected the {{ upload_data_type }} upload
+          (HTTP {{ concert_upload.stdout | default('no answer') }}):
+          {{ (concert_upload_answer.content | default('') | b64decode)[:800] }}
