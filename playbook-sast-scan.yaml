@@ -1,0 +1,13 @@
+# Scan an application's source code with Semgrep and upload the result to IBM Concert
+# (static_code_scan). Started by the AWX job template scan-code-sast. Required extra
+# vars: sast_application_name, concert_url, concert_api_key. Optional: sast_repo_url
+# (default: the robot shop repository), sast_application_version, sast_semgrep_config.
+- name: Static code scan (Semgrep) and upload to Concert
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Run the code scan
+      ansible.builtin.include_role:
+        name: concert-demo
+        tasks_from: setup_sast_scan.yaml

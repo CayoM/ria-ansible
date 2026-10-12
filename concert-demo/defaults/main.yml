@@ -19,6 +19,15 @@ vuln_scan_hostname: ""     # empty = Kubernetes node name (what Concert knows th
 concert_url: ""            # https://<concert route>; empty = scan only, no upload
 concert_api_key: ""
 
+# Static code scan (Semgrep -> Concert static_code_scan), see tasks/setup_sast_scan.yaml
+sast_dir: /tmp/concert-sast
+sast_semgrep_version: "1.136.0"
+sast_semgrep_config: "p/default"   # rule pack from the Semgrep registry (needs access to semgrep.dev)
+sast_application_name: ""          # Concert application to attach the repository to (required)
+sast_application_version: "1.0.0"
+sast_repo_url: "{{ robotshop_git_repo }}"
+sast_repo_name: "{{ sast_repo_url | basename | regex_replace('\\.git$', '') }}"
+
 guard_cloud_init: true
 
 # Pinned instead of "stable" (resolved via update.k3s.io) to avoid depending on

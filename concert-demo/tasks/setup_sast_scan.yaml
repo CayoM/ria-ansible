@@ -1,0 +1,96 @@
+# Static code scan (SAST) with Semgrep, uploaded to IBM Concert as static_code_scan.
+# =================================================================================
+# Runs on localhost inside the AWX job pod (container group); no VM involved: the
+# scan reads the application's source repository. One run per application version
+# is enough, the code does not change with each VM.
+#
+# What Concert does with the upload (read in the pipeline source of 3.0.1.1,
+# exposlib/exposure_handler.py): repo_url and repo_name are mandatory; the
+# repository is created by the upload itself and, when application_name and
+# application_version are given, associated with that application. No SBOM and no
+# earlier repository link are needed. The SARIF must carry runs[].tool.driver.name
+# and per result ruleId, message.text and locations[].physicalLocation.artifactLocation.uri;
+# Semgrep's SARIF does.
+#
+# Inputs: sast_application_name (required), concert_url, concert_api_key.
+
+- name: Check the required inputs
+  ansible.builtin.assert:
+    that:
+      - sast_application_name | length > 0
+      - sast_repo_url | length > 0
+      - concert_url | length > 0
+      - concert_api_key | length > 0
+    fail_msg: "sast_application_name, sast_repo_url, concert_url and concert_api_key are required"
+
+- name: Start with a clean scan directory
+  ansible.builtin.file:
+    path: "{{ sast_dir }}"
+    state: absent
+
+- name: Create the scan directory
+  ansible.builtin.file:
+    path: "{{ sast_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Install Semgrep into a virtual environment
+  ansible.builtin.pip:
+    name: "semgrep=={{ sast_semgrep_version }}"
+    virtualenv: "{{ sast_dir }}/venv"
+    virtualenv_command: python3 -m venv
+
+- name: Clone the source repository
+  ansible.builtin.git:
+    repo: "{{ sast_repo_url }}"
+    dest: "{{ sast_dir }}/src"
+    depth: 1
+  register: sast_clone
+
+- name: Read the branch that was checked out
+  ansible.builtin.command: git -C {{ sast_dir }}/src rev-parse --abbrev-ref HEAD
+  register: sast_branch
+  changed_when: false
+
+# HOME must be writable (Semgrep keeps its cache and settings there), metrics stay off.
+- name: Scan the source with Semgrep
+  ansible.builtin.command: >-
+    {{ sast_dir }}/venv/bin/semgrep scan
+    --config {{ sast_semgrep_config }}
+    --sarif --output {{ sast_dir }}/semgrep.sarif
+    --metrics off --quiet --disable-version-check
+    {{ sast_dir }}/src
+  environment:
+    HOME: "{{ sast_dir }}"
+  changed_when: true
+
+- name: Read the SARIF report
+  ansible.builtin.slurp:
+    src: "{{ sast_dir }}/semgrep.sarif"
+  register: sast_sarif
+
+- name: Count the findings
+  ansible.builtin.set_fact:
+    sast_finding_count: "{{ (sast_sarif.content | b64decode | from_json).runs | map(attribute='results') | map('length') | sum }}"
+
+- name: Publish the scan summary as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      sast_repo_name: "{{ sast_repo_name }}"
+      sast_commit_sha: "{{ sast_clone.after }}"
+      sast_finding_count: "{{ sast_finding_count }}"
+
+- name: Upload the code scan to Concert
+  ansible.builtin.include_tasks: concert_upload.yaml
+  vars:
+    upload_data_type: static_code_scan
+    upload_file: "{{ sast_dir }}/semgrep.sarif"
+    upload_metadata:
+      repo_name: "{{ sast_repo_name }}"
+      repo_url: "{{ sast_repo_url }}"
+      commit_sha: "{{ sast_clone.after }}"
+      branch: "{{ sast_branch.stdout }}"
+      application_name: "{{ sast_application_name }}"
+      application_version: "{{ sast_application_version }}"
+      scanner_name: semgrep
+      scan_date: "{{ ansible_date_time.epoch }}"
