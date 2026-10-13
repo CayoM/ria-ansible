@@ -34,7 +34,10 @@ sast_force: false                  # true: scan even if Concert already holds a 
 # Dynamic scan (OWASP ZAP -> Concert dynamic_scan), see tasks/setup_dast_scan.yaml
 dast_dir: /tmp/concert-dast
 dast_zap_proxy: "http://zap.concert-dast.svc:8090"   # ZAP service (optimized-solution install_zap.yml)
-dast_access_point_name: "web"
+# Concert keeps ONE access point per name and ties it to one environment: a second
+# environment uploading "web" fails with "access point is already associated with another
+# environment" (ERR_ACCESS_POINT_ASSOCIATION, seen 2026-10-13 with PROD/INT next to DEV).
+dast_access_point_name: "web-{{ dast_env_name }}"
 dast_spider_max_children: 50
 dast_target_url: ""                # e.g. http://web.<ip>.nip.io
 dast_env_name: ""                  # Concert environment (= deployment id)
