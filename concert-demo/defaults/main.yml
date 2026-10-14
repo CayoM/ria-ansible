@@ -24,6 +24,7 @@ compliance_dir: /var/lib/concert-compliance-scan
 compliance_id: "k8s-cis-1.23"           # Trivy built-in spec, also the name of the Concert profile
 compliance_profile: "{{ compliance_id }}"
 compliance_scan_timeout: "30m"
+compliance_show_checks: false           # true: print the checks Trivy reported in the job log
 compliance_debug: false                 # true: do not hide Concert API calls in the job log (shows the API key)
 compliance_env_name: ""                 # Concert environment (= deployment id)
 compliance_application_name: ""         # Concert application, <app>-<environment type>

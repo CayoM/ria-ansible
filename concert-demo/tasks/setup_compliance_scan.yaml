@@ -70,6 +70,30 @@
   register: compliance_convert
   changed_when: true
 
+- name: Show which checks Trivy reported (compliance_show_checks)
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    import collections, json
+    doc = json.load(open("{{ compliance_dir }}/compliance_posture.json"))
+    obs = doc["results"][0]["observations"]
+    by = collections.defaultdict(list)
+    for o in obs:
+        p = {x["name"]: x["value"] for x in o["props"]}
+        by[p["result"]].append(p["idref"])
+    for status, ids in sorted(by.items()):
+        print(status, len(ids), " ".join(sorted(ids)))
+    report = json.load(open("{{ compliance_dir }}/trivy-compliance.json"))
+    print("report keys:", sorted(report), "| controls:", len(report.get("Results") or []))
+    PY
+  register: compliance_debug_ids
+  changed_when: false
+  when: compliance_show_checks | bool
+
+- name: Print the reported checks
+  ansible.builtin.debug:
+    msg: "{{ compliance_debug_ids.stdout_lines }}"
+  when: compliance_show_checks | bool
+
 - name: Publish scan summary as job artifacts
   ansible.builtin.set_stats:
     data:
