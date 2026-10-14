@@ -14,10 +14,15 @@
 # Inputs: concert_url, concert_api_key, compliance_application_name, compliance_profile.
 # Runs on the AWX controller (delegate_to localhost): the VM does not need to reach Concert's API.
 
+# become: false - the playbook runs the VM tasks as root, but this block runs on the AWX job
+# pod where there is no sudo.
+# no_log hides the Concert API key; compliance_debug=true shows the failure reason.
 - name: Link the application to the compliance profile
   delegate_to: localhost
   run_once: true
+  become: false
   vars:
+    compliance_no_log: "{{ not (compliance_debug | bool) }}"
     concert_headers:
       Accept: application/json
       InstanceId: "0000-0000-0000-0000"
@@ -30,7 +35,7 @@
         validate_certs: false
         status_code: [200]
       register: compliance_applications
-      no_log: true
+      no_log: "{{ compliance_no_log }}"
 
     - name: Find the release of the application
       ansible.builtin.set_fact:
@@ -55,7 +60,7 @@
         validate_certs: false
         status_code: [200]
       register: compliance_profiles
-      no_log: true
+      no_log: "{{ compliance_no_log }}"
 
     - name: Find the profile
       ansible.builtin.set_fact:
@@ -78,7 +83,7 @@
         validate_certs: false
         status_code: [200]
       register: compliance_profile_now
-      no_log: true
+      no_log: "{{ compliance_no_log }}"
 
     - name: Group the profile's controls by catalog
       ansible.builtin.set_fact:
@@ -104,4 +109,4 @@
           application_releases_ids: "{{ compliance_releases_linked + [compliance_release_id] }}"
         validate_certs: false
         status_code: [200]
-      no_log: true
+      no_log: "{{ compliance_no_log }}"
