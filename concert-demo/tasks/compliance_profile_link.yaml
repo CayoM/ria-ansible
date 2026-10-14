@@ -78,7 +78,9 @@
 
     - name: Read the profile
       ansible.builtin.uri:
-        url: "{{ concert_url }}/compliance/api/v1/profiles/{{ compliance_profile_id }}"
+        # page_size: GET returns only the first 25 controls by default, and the PUT below sends back
+        # exactly what was read - without it a profile with more controls would be cut to 25.
+        url: "{{ concert_url }}/compliance/api/v1/profiles/{{ compliance_profile_id }}?page_size=500"
         headers: "{{ concert_headers }}"
         validate_certs: false
         status_code: [200]
