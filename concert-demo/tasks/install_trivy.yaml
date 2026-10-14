@@ -1,0 +1,27 @@
+# Install the Trivy binary on the target VM (checksum verified). Shared by the host
+# vulnerability scan (setup_vuln_scan.yaml) and the compliance scan (setup_compliance_scan.yaml).
+
+- name: Map architecture to the Trivy release asset suffix
+  ansible.builtin.set_fact:
+    trivy_asset_arch: "{{ {'x86_64': '64bit', 'aarch64': 'ARM64'}[ansible_architecture] }}"
+
+- name: Download Trivy release (checksum verified)
+  ansible.builtin.get_url:
+    url: "https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_Linux-{{ trivy_asset_arch }}.tar.gz"
+    checksum: "sha256:https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_checksums.txt"
+    dest: "/tmp/trivy_{{ trivy_version }}_{{ trivy_asset_arch }}.tar.gz"
+    mode: "0644"
+  register: trivy_download
+  retries: 3
+  delay: 10
+  until: trivy_download is succeeded
+
+- name: Install Trivy binary
+  ansible.builtin.unarchive:
+    src: "/tmp/trivy_{{ trivy_version }}_{{ trivy_asset_arch }}.tar.gz"
+    dest: /usr/local/bin
+    include: [trivy]
+    remote_src: true
+    mode: "0755"
+  args:
+    creates: "/usr/local/bin/trivy"

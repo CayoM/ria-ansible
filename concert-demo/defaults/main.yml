@@ -19,6 +19,14 @@ vuln_scan_hostname: ""     # empty = Kubernetes node name (what Concert knows th
 concert_url: ""            # https://<concert route>; empty = scan only, no upload
 concert_api_key: ""
 
+# Compliance scan (Trivy CIS Kubernetes benchmark -> Concert compliance_posture), see tasks/setup_compliance_scan.yaml
+compliance_dir: /var/lib/concert-compliance-scan
+compliance_id: "k8s-cis-1.23"           # Trivy built-in spec, also the name of the Concert profile
+compliance_profile: "{{ compliance_id }}"
+compliance_scan_timeout: "30m"
+compliance_env_name: ""                 # Concert environment (= deployment id)
+compliance_application_name: ""         # Concert application, <app>-<environment type>
+
 # Static code scan (Semgrep -> Concert static_code_scan), see tasks/setup_sast_scan.yaml
 sast_dir: /tmp/concert-sast
 sast_semgrep_version: "1.136.0"

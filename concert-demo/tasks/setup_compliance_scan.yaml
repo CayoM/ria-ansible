@@ -1,0 +1,85 @@
+# Kubernetes compliance scan for IBM Concert (compliance_posture)
+# ================================================================
+# Runs Trivy's CIS Kubernetes benchmark (k8s-cis-1.23) against the k3s cluster of this VM,
+# converts the report to OSCAL and uploads it to Concert, where it becomes a posture of the
+# environment under Protect > Compliance > Postures.
+#
+# What Concert needs (IBM docs "Managing compliance postures and assessments", plus the
+# compliance pipeline of the instance):
+#  - a compliance profile named like the benchmark id (k8s-cis-1.23) with the CIS Controls
+#    catalog: created by optimized-solution (--tags compliance-catalogs)
+#  - the application of the deployment linked to that profile: done here every run
+#    (compliance_profile_link.yaml), so new apps need no change
+#  - the environment name in the scan: Concert's own Trivy converter takes it from an
+#    OpenShift style target and answers "No_Target_Name" for k3s, so files/compliance/
+#    trivy_to_oscal.py writes the same OSCAL with the Concert environment name as host.
+#
+# Required: compliance_env_name (Concert environment = deployment id),
+#           compliance_application_name (Concert application, <app>-<environment type>),
+#           concert_url, concert_api_key.
+
+- name: Check the scan inputs
+  ansible.builtin.assert:
+    that:
+      - compliance_env_name | length > 0
+      - compliance_application_name | length > 0
+      - concert_url | length > 0
+      - concert_api_key | length > 0
+    fail_msg: >-
+      scan-compliance-cis needs compliance_env_name, compliance_application_name,
+      concert_url and concert_api_key.
+
+- name: Link the application to the compliance profile in Concert
+  ansible.builtin.include_tasks: compliance_profile_link.yaml
+
+- name: Install Trivy
+  ansible.builtin.include_tasks: install_trivy.yaml
+
+- name: Create scan work directory
+  ansible.builtin.file:
+    path: "{{ compliance_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Install the Trivy to OSCAL converter
+  ansible.builtin.copy:
+    src: compliance/trivy_to_oscal.py
+    dest: "{{ compliance_dir }}/trivy_to_oscal.py"
+    mode: "0755"
+
+# Trivy starts a node-collector job in the cluster for the kubelet and control plane checks
+# and pulls its image, so the first run takes a few minutes.
+- name: Run the CIS Kubernetes benchmark with Trivy
+  ansible.builtin.command: >-
+    trivy k8s --kubeconfig /etc/rancher/k3s/k3s.yaml
+    --compliance {{ compliance_id }} --report all --format json --quiet
+    --timeout {{ compliance_scan_timeout }}
+    --output {{ compliance_dir }}/trivy-compliance.json
+  register: compliance_trivy
+  retries: 2
+  delay: 30
+  until: compliance_trivy.rc == 0
+  changed_when: true
+
+- name: Convert the Trivy report to Concert compliance_posture input
+  ansible.builtin.command: >-
+    python3 {{ compliance_dir }}/trivy_to_oscal.py
+    --trivy {{ compliance_dir }}/trivy-compliance.json
+    --hostname {{ compliance_env_name | quote }}
+    --out {{ compliance_dir }}/compliance_posture.json
+  register: compliance_convert
+  changed_when: true
+
+- name: Publish scan summary as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      compliance_scan_summary: "{{ compliance_convert.stdout }}"
+
+# The upload runs on the VM like the host scan's: the file is here.
+- name: Upload the compliance scan to Concert
+  ansible.builtin.include_tasks: concert_upload.yaml
+  vars:
+    upload_data_type: compliance_posture
+    upload_file: "{{ compliance_dir }}/compliance_posture.json"
+    upload_metadata:
+      scan_date: "{{ ansible_date_time.epoch }}"

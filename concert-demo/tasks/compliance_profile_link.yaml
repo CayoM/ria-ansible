@@ -1,0 +1,107 @@
+# Make sure the Concert application of this deployment is part of the compliance profile.
+# =========================================================================================
+# A profile lists the applications it is assessed for (Protect > Compliance > Profiles >
+# Create profile > "select one or more applications"). Doing that by hand does not scale: a
+# new app or environment would need a click. So every scan adds its own application here.
+#
+# Calls (found by watching the compliance service while the UI did the same):
+#   GET  /concert/core/api/v2/applications?filter=versions:all   -> application_release_id
+#   GET  /compliance/api/v1/profiles, GET /compliance/api/v1/profiles/{id}
+#   PUT  /compliance/api/v1/profiles/{id}   body carries "uuid" (the id in the URL alone is
+#        rejected as invalid) plus the whole profile: title, version, description,
+#        allow_manual_assessment, controls [{catalog_id, control_ids}], application_releases_ids
+#
+# Inputs: concert_url, concert_api_key, compliance_application_name, compliance_profile.
+# Runs on the AWX controller (delegate_to localhost): the VM does not need to reach Concert's API.
+
+- name: Link the application to the compliance profile
+  delegate_to: localhost
+  run_once: true
+  vars:
+    concert_headers:
+      Accept: application/json
+      InstanceId: "0000-0000-0000-0000"
+      Authorization: "C_API_KEY {{ concert_api_key }}"
+  block:
+    - name: Read the applications (all versions)
+      ansible.builtin.uri:
+        url: "{{ concert_url }}/concert/core/api/v2/applications?filter=versions%3Aall&page_size=2000"
+        headers: "{{ concert_headers }}"
+        validate_certs: false
+        status_code: [200]
+      register: compliance_applications
+      no_log: true
+
+    - name: Find the release of the application
+      ansible.builtin.set_fact:
+        compliance_release_id: >-
+          {{ (compliance_applications.json.applications
+              | selectattr('name', 'equalto', compliance_application_name)
+              | selectattr('latest', 'equalto', true)
+              | map(attribute='application_release_id') | list | first) | default('') }}
+
+    - name: Fail when Concert does not know the application yet
+      ansible.builtin.fail:
+        msg: >-
+          Concert has no application {{ compliance_application_name }}. The environment is
+          registered by the Concert Workflows flow Register-Concert-Kubernetes-Environment;
+          scan after that flow has run.
+      when: compliance_release_id | length == 0
+
+    - name: Read the profiles
+      ansible.builtin.uri:
+        url: "{{ concert_url }}/compliance/api/v1/profiles?page_size=500"
+        headers: "{{ concert_headers }}"
+        validate_certs: false
+        status_code: [200]
+      register: compliance_profiles
+      no_log: true
+
+    - name: Find the profile
+      ansible.builtin.set_fact:
+        compliance_profile_id: >-
+          {{ (compliance_profiles.json.data
+              | selectattr('title', 'equalto', compliance_profile)
+              | map(attribute='uuid') | list | first) | default('') }}
+
+    - name: Fail when the profile is missing
+      ansible.builtin.fail:
+        msg: >-
+          Concert has no compliance profile {{ compliance_profile }}. Create it with the
+          optimized-solution playbook: ansible-playbook site.yml --tags compliance-catalogs
+      when: compliance_profile_id | length == 0
+
+    - name: Read the profile
+      ansible.builtin.uri:
+        url: "{{ concert_url }}/compliance/api/v1/profiles/{{ compliance_profile_id }}"
+        headers: "{{ concert_headers }}"
+        validate_certs: false
+        status_code: [200]
+      register: compliance_profile_now
+      no_log: true
+
+    - name: Group the profile's controls by catalog
+      ansible.builtin.set_fact:
+        compliance_controls_by_catalog: >-
+          {% set out = [] %}{% for catalog_id, items in compliance_profile_now.json.data.controls | groupby('catalog_id') %}{% set _ = out.append({'catalog_id': catalog_id, 'control_ids': items | map(attribute='uuid') | list}) %}{% endfor %}{{ out | to_json }}
+        compliance_releases_linked: >-
+          {{ compliance_profile_now.json.data.application_details | map(attribute='application_releases_id') | list }}
+
+    - name: Add the application release to the profile
+      when: compliance_release_id not in compliance_releases_linked
+      ansible.builtin.uri:
+        url: "{{ concert_url }}/compliance/api/v1/profiles/{{ compliance_profile_id }}"
+        method: PUT
+        headers: "{{ concert_headers }}"
+        body_format: json
+        body:
+          uuid: "{{ compliance_profile_id }}"
+          title: "{{ compliance_profile_now.json.data.title }}"
+          version: "{{ compliance_profile_now.json.data.version }}"
+          description: "{{ compliance_profile_now.json.data.description }}"
+          allow_manual_assessment: "{{ compliance_profile_now.json.data.allow_manual_assessment }}"
+          controls: "{{ compliance_controls_by_catalog | from_json }}"
+          application_releases_ids: "{{ compliance_releases_linked + [compliance_release_id] }}"
+        validate_certs: false
+        status_code: [200]
+      no_log: true

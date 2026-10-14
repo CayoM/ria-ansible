@@ -1,0 +1,24 @@
+# Run Trivy's CIS Kubernetes benchmark on one demo VM and upload the result to IBM Concert
+# (compliance_posture). Started by the AWX job template scan-compliance-cis from the Concert
+# Workflows (after a new VM was registered and on a schedule). Required extra vars: ec2_ip,
+# remote_user, compliance_env_name (Concert environment = deployment id),
+# compliance_application_name (<app>-<environment type>), concert_url, concert_api_key.
+- name: Add host dynamically
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add the scan target
+      ansible.builtin.add_host:
+        name: ec2_target
+        ansible_host: "{{ ec2_ip }}"
+        ansible_user: "{{ remote_user }}"
+        groups: ec2_dynamic_group
+
+- name: Scan the cluster and upload to Concert
+  hosts: ec2_dynamic_group
+  become: true
+  tasks:
+    - name: Run the compliance scan
+      ansible.builtin.include_role:
+        name: concert-demo
+        tasks_from: setup_compliance_scan.yaml
