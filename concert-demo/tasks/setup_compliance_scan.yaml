@@ -84,6 +84,14 @@
         print(status, len(ids), " ".join(sorted(ids)))
     report = json.load(open("{{ compliance_dir }}/trivy-compliance.json"))
     print("report keys:", sorted(report), "| controls:", len(report.get("Results") or []))
+    for c in (report.get("Results") or [])[:4]:
+        print("control:", json.dumps({k: (v if k != "Results" else "<%s>" % type(v).__name__) for k, v in c.items()})[:300])
+    shown = 0
+    for c in report.get("Results") or []:
+        for t in c.get("Results") or []:
+            if shown < 3:
+                print("target:", json.dumps({k: v for k, v in t.items() if k != "Misconfigurations"})[:300], "| misconfigurations:", len(t.get("Misconfigurations") or []))
+                shown += 1
     PY
   register: compliance_debug_ids
   changed_when: false
