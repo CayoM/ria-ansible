@@ -68,6 +68,19 @@ class TrivyToOscalTest(unittest.TestCase):
         self.assertEqual(self.result["observations"][0]["collected"], "2026-10-14T13:00:00Z")
         self.assertEqual(self.result["start"], "2026-10-14T13:00:00Z")
 
+    def test_check_ids_without_avd_prefix_are_normalised(self):
+        # Trivy 0.75 reports ID "KSV-0001" and no AVDID; Concert maps "AVD-KSV-0001".
+        report = {"ID": "k8s-cis-1.23", "Results": [{"ID": "5.1.1", "Results": [{"Target": "Pod/x", "Misconfigurations": [
+            {"ID": "KSV-0001", "Title": "t", "Status": "FAIL"},
+            {"ID": "KSV001", "Title": "old style", "Status": "FAIL"},
+            {"ID": "KCV0048", "Title": "kubelet", "Status": "PASS"},
+            {"ID": "AVD-KSV-0017", "Title": "has prefix", "Status": "FAIL"},
+            {"ID": "SOMETHING-ELSE", "Title": "unknown family", "Status": "FAIL"},
+        ]}]}]}
+        doc = convert(report, hostname="h", now="2026-10-14T13:00:00Z")
+        ids = sorted(o["props"][0]["value"] for o in doc["results"][0]["observations"])
+        self.assertEqual(ids, ["AVD-KCV-0048", "AVD-KSV-0001", "AVD-KSV-0017", "SOMETHING-ELSE"])
+
     def test_empty_hostname_is_rejected(self):
         with self.assertRaises(ValueError):
             convert(TRIVY, hostname="")

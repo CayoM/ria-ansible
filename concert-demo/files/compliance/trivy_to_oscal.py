@@ -13,6 +13,7 @@ Runs on the demo VMs (Ubuntu 22.04, Python 3.10): standard library only.
 """
 import argparse
 import json
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +25,19 @@ def _now():
     return datetime.now(timezone.utc).strftime(TIME_FORMAT)
 
 
+_CHECK_ID = re.compile(r"^(KSV|KCV)-?0*(\d+)$")
+
+
+def _check_id(misconfiguration):
+    """Concert maps checks as AVD-KSV-0001 / AVD-KCV-0048. Trivy 0.75 reports "KSV-0001" and
+    no AVDID, older versions "KSV001" or "KCV0048"; anything unknown is passed on as it is."""
+    raw = misconfiguration.get("AVDID") or misconfiguration.get("ID") or ""
+    match = _CHECK_ID.match(raw)
+    if match:
+        return "AVD-{}-{:04d}".format(match.group(1), int(match.group(2)))
+    return raw
+
+
 def _observations(report, inventory_uuid, now):
     """One observation per check id; Trivy repeats a check under every control that uses it."""
     seen = set()
@@ -31,7 +45,7 @@ def _observations(report, inventory_uuid, now):
     for control in report.get("Results") or []:
         for target in control.get("Results") or []:
             for misconfiguration in target.get("Misconfigurations") or []:
-                check_id = misconfiguration.get("AVDID") or misconfiguration.get("ID")
+                check_id = _check_id(misconfiguration)
                 if not check_id or check_id in seen:
                     continue
                 seen.add(check_id)
