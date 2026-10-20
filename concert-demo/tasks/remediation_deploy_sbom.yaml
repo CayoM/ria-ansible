@@ -1,0 +1,63 @@
+# Deploy SBOM (ConcertDef 2.0.0) for one VM, so that Concert can create OS-patch
+# remediation actions for it (playbook-remediation-register.yaml).
+#
+# Schema: Concert 3.1 docs "Deploy SBOM schema (ConcertDef)". For auto-remediation the
+# runtime component of type "vm" needs the properties "os" and "version".
+# The VM name is the Kubernetes node name, because Concert matches a vm_scan to its host
+# by that name (see setup_vuln_scan.yaml), so scan, SBOM and patch talk about one host.
+# Environment and application names are the ones the Concert Workflow registers
+# (<deployment id>, <app>-<environment type>). Upload: data_type application_sbom (docs
+# "Uploading data via API": also for deploy SBOMs).
+#
+# Inputs: ec2_ip, concert_url, concert_api_key, remediation_env_name,
+#         remediation_application_name
+
+- name: Resolve the host name Concert knows (Kubernetes node name)
+  ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[0].metadata.name}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: remediation_node
+  changed_when: false
+
+- name: Write the Deploy SBOM
+  ansible.builtin.copy:
+    dest: /tmp/remediation-deploy-sbom.json
+    mode: "0600"
+    content: "{{ remediation_sbom | to_nice_json }}"
+  vars:
+    remediation_vm_name: "{{ remediation_node.stdout }}"
+    remediation_sbom:
+      bomFormat: ConcertDef
+      specVersion: "2.0.0"
+      metadata:
+        timestamp: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+        type: deploy
+        deploy-name: "{{ remediation_env_name }}-vm"
+        application-name: "{{ remediation_application_name }}"
+        application-version: "{{ remediation_application_version | default('1.0.0') }}"
+      environment:
+        bom-ref: "environment:{{ remediation_env_name }}"
+        name: "{{ remediation_env_name }}"
+      runtime-components:
+        - bom-ref: "infra:vm:{{ remediation_vm_name }}"
+          name: "{{ remediation_vm_name }}"
+          type: vm
+          hostname: "{{ remediation_vm_name }}"
+          ipv4:
+            - addr: "{{ ec2_ip }}"
+          properties:
+            - name: os
+              value: "{{ ansible_distribution | lower }}"
+            - name: version
+              value: "{{ ansible_distribution_version }}"
+      dependencies:
+        - ref: "environment:{{ remediation_env_name }}"
+          dependsOn:
+            - "infra:vm:{{ remediation_vm_name }}"
+
+- name: Upload the Deploy SBOM
+  ansible.builtin.include_tasks: concert_upload.yaml
+  vars:
+    upload_data_type: application_sbom
+    upload_file: /tmp/remediation-deploy-sbom.json
+    upload_metadata: {}

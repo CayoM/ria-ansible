@@ -1,0 +1,88 @@
+# Point the two remediation authentications in Concert Workflows at one VM
+# (playbook-remediation-register.yaml). Runs on the AWX execution node.
+#
+# How IBM's Remediation_Master > Apply_Ubuntu_Patch uses them (read from the workflow,
+# IBM/Concert v3.1.0 Remediation_Master.zip):
+#   - patches are grouped by recommendation.environment.host_name, i.e. the host name of
+#     the scan = Kubernetes node name;
+#   - Config Data Object: {"config": [{"auth": "<user>/<ansible auth>", "host": [<name>]}]}
+#     - "host" must hold that same name, not the IP;
+#   - Ansible authentication: the playbook runs on inventory group [canary] and looks up
+#     patch_data[inventory_hostname], so the inventory host is the node name with the
+#     public IP as ansible_host. private_key_file is a JSON object {file name: base64 key}.
+# Concert Workflows API (same as optimized-solution): admin OAuth token with the web UI's
+# client pliant.io-spa, then PATCH /workflows/api/v1/authstorages/<user>/<name>.
+#
+# Inputs: ec2_ip, remote_user, ssh_private_key, cw_url, cw_admin_password,
+#         remediation_auth_name, remediation_configs_name, remediation_cw_user
+
+- name: Set the remediation authentication names
+  ansible.builtin.set_fact:
+    remediation_user: "{{ remediation_cw_user | default('ibmconcert') }}"
+    remediation_auth: "{{ remediation_auth_name | default('remediation-linux-patch') }}"
+    remediation_configs: "{{ remediation_configs_name | default('remediation-linux-configs') }}"
+    remediation_host: "{{ hostvars['ec2_target'].remediation_node.stdout }}"
+
+- name: Get a Concert Workflows admin token
+  ansible.builtin.uri:
+    url: "{{ cw_url }}/api/oauth/token"
+    method: POST
+    headers:
+      Authorization: "Basic {{ 'pliant.io-spa:V7UOGzAlvxWLUX8Fc5aT' | b64encode }}"
+    body_format: form-urlencoded
+    body:
+      grant_type: password
+      scope: "read write execute"
+      username: admin
+      password: "{{ cw_admin_password }}"
+    validate_certs: false
+  register: remediation_cw_token
+  no_log: true
+
+- name: Point the Ansible authentication at the VM
+  ansible.builtin.uri:
+    url: "{{ cw_url }}/workflows/api/v1/authstorages/{{ remediation_user }}/{{ remediation_auth }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ remediation_cw_token.json.access_token }}"
+    body:
+      name: "{{ remediation_auth }}"
+      description: "SSH access for Concert OS patching (set by remediation-register)"
+      serviceName: Ansible
+      data:
+        private_key_file: "{{ {'vm.b64': ssh_private_key | b64encode} | to_json }}"
+        inventory: |
+          [canary]
+          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.b64
+      canOverride: [private_key_file, inventory]
+    body_format: json
+    validate_certs: false
+    status_code: [200, 204]
+  no_log: true
+
+- name: Map the VM's host name to the Ansible authentication
+  ansible.builtin.uri:
+    url: "{{ cw_url }}/workflows/api/v1/authstorages/{{ remediation_user }}/{{ remediation_configs }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ remediation_cw_token.json.access_token }}"
+    body:
+      name: "{{ remediation_configs }}"
+      description: "Host -> authentication for Concert OS patching (set by remediation-register)"
+      serviceName: Common/ConfigDataObject
+      data:
+        data:
+          config:
+            - auth: "{{ remediation_user }}/{{ remediation_auth }}"
+              host: ["{{ remediation_host }}"]
+      canOverride: []
+    body_format: json
+    validate_certs: false
+    status_code: [200, 204]
+  no_log: true
+
+- name: Report the registration
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ remediation_host }} ({{ ec2_ip }}) registered for Concert OS patching:
+      {{ remediation_user }}/{{ remediation_configs }} -> {{ remediation_user }}/{{ remediation_auth }}

@@ -1,0 +1,49 @@
+# Register one demo VM for Concert auto-remediation (Ubuntu OS patching).
+# =======================================================================
+# Started by the Concert Workflow End-to-End-Automation after the VM is up.
+# Concert 3.1 auto-remediation needs, per VM (docs "Configuring auto-remediation
+# workflows", "Deploy SBOM schema (ConcertDef)", "Setting up authentication for
+# Linux remediation"):
+#   1. a Deploy SBOM whose runtime component (type vm) carries the properties
+#      os=ubuntu and version=<release>, otherwise Concert creates no actions;
+#   2. an Ansible authentication (private key + inventory group [canary]) that
+#      reaches the VM, and a Config Data Object that maps the VM's IP to it -
+#      Remediation_Master > Apply_Ubuntu_Patch patches through these.
+# The two authentications are fixed names that optimized-solution creates once per
+# cluster (tasks/concert_remediation.yml); this playbook overwrites their content
+# with the current VM, so the VM registered last is the one that gets patched.
+#
+# Required extra vars: ec2_ip, remote_user, ssh_private_key, concert_url,
+#   concert_api_key, cw_url, cw_admin_password, remediation_env_name,
+#   remediation_application_name
+# Optional: remediation_auth_name, remediation_configs_name, remediation_cw_user
+
+- name: Add host dynamically
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Add the VM
+      ansible.builtin.add_host:
+        name: ec2_target
+        ansible_host: "{{ ec2_ip }}"
+        ansible_user: "{{ remote_user }}"
+        groups: ec2_dynamic_group
+
+- name: Upload the Deploy SBOM of the VM to Concert
+  hosts: ec2_dynamic_group
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Upload the Deploy SBOM
+      ansible.builtin.include_role:
+        name: concert-demo
+        tasks_from: remediation_deploy_sbom.yaml
+
+- name: Point the remediation authentications at the VM
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Update the Concert Workflows authentications
+      ansible.builtin.include_role:
+        name: concert-demo
+        tasks_from: remediation_cw_auth.yaml
