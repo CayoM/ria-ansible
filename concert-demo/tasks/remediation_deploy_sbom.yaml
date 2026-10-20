@@ -2,7 +2,10 @@
 # remediation actions for it (playbook-remediation-register.yaml).
 #
 # Schema: Concert 3.1 docs "Deploy SBOM schema (ConcertDef)". For auto-remediation the
-# runtime component of type "vm" needs the properties "os" and "version".
+# runtime component of type "vm" needs the properties "os" and "version". Concert's
+# validator also requires "components" on it (docs VM example: deployment > image, as
+# in IBM/Concert concert-concertdef-samples/spec-versions/2.0.0), so the app workloads
+# running in k3s on the VM are listed there.
 # The VM name is the Kubernetes node name, because Concert matches a vm_scan to its host
 # by that name (see setup_vuln_scan.yaml), so scan, SBOM and patch talk about one host.
 # Environment and application names are the ones the Concert Workflow registers
@@ -18,6 +21,43 @@
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   register: remediation_node
   changed_when: false
+
+- name: Read the app workloads running on the VM
+  ansible.builtin.command: kubectl get deployments --all-namespaces -o json
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: remediation_k8s_deployments
+  changed_when: false
+
+- name: Build the workload components (deployment > image)
+  ansible.builtin.set_fact:
+    remediation_workloads: |
+      {% set workloads = [] %}
+      {% for d in remediation_app_deployments %}
+      {%   set images = [] %}
+      {%   for uri in d.spec.template.spec.containers | map(attribute='image') | unique %}
+      {%     set _ = images.append({'bom-ref': 'image:' ~ uri, 'type': 'image',
+                                    'name': uri | regex_replace('^.*/', '') | regex_replace('[:@].*$', ''),
+                                    'uri': uri}) %}
+      {%   endfor %}
+      {%   set _ = workloads.append({'bom-ref': 'deployment:' ~ d.metadata.namespace ~ ':' ~ d.metadata.name,
+                                     'type': 'deployment', 'name': d.metadata.name,
+                                     'properties': [{'name': 'workload.type', 'value': 'container'}],
+                                     'components': images}) %}
+      {% endfor %}
+      {{ workloads }}
+  vars:
+    remediation_system_namespaces: [kube-system, kube-public, kube-node-lease, instana-agent]
+    remediation_app_deployments: >-
+      {{ (remediation_k8s_deployments.stdout | from_json)['items']
+         | rejectattr('metadata.namespace', 'in', remediation_system_namespaces) | list }}
+
+- name: Require at least one app workload on the VM
+  ansible.builtin.assert:
+    that: remediation_workloads | length > 0
+    fail_msg: >-
+      No app deployment found in k3s on {{ ec2_ip }} - Concert rejects a vm runtime
+      component without components.
 
 - name: Write the Deploy SBOM
   ansible.builtin.copy:
@@ -50,6 +90,7 @@
               value: "{{ ansible_distribution | lower }}"
             - name: version
               value: "{{ ansible_distribution_version }}"
+          components: "{{ remediation_workloads }}"
       dependencies:
         - ref: "environment:{{ remediation_env_name }}"
           dependsOn:
