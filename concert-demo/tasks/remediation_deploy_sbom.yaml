@@ -6,8 +6,9 @@
 # validator also requires "components" on it (docs VM example: deployment > image, as
 # in IBM/Concert concert-concertdef-samples/spec-versions/2.0.0), so the app workloads
 # running in k3s on the VM are listed there.
-# The VM name is the Kubernetes node name, because Concert matches a vm_scan to its host
-# by that name (see setup_vuln_scan.yaml), so scan, SBOM and patch talk about one host.
+# The VM name is concert_vm_host_name (defaults/main.yml), the same name the host scan
+# reports as dnsName, so scan, SBOM and patch talk about one host. Not the k3s node name:
+# Concert's Kubernetes discovery owns that one as sub_type k8s:Node and would swallow the VM.
 # Environment and application names are the ones the Concert Workflow registers
 # (<deployment id>, <app>-<environment type>). Upload: data_type application_sbom (docs
 # "Uploading data via API": also for deploy SBOMs).
@@ -15,12 +16,9 @@
 # Inputs: ec2_ip, concert_url, concert_api_key, remediation_env_name,
 #         remediation_application_name
 
-- name: Resolve the host name Concert knows (Kubernetes node name)
-  ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[0].metadata.name}'
-  environment:
-    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  register: remediation_node
-  changed_when: false
+- name: Set the VM's host name in Concert
+  ansible.builtin.set_fact:
+    remediation_vm_host: "{{ concert_vm_host_name }}"
 
 - name: Read the app workloads running on the VM
   ansible.builtin.command: kubectl get deployments --all-namespaces -o json
@@ -65,7 +63,7 @@
     mode: "0600"
     content: "{{ remediation_sbom | to_nice_json }}"
   vars:
-    remediation_vm_name: "{{ remediation_node.stdout }}"
+    remediation_vm_name: "{{ remediation_vm_host }}"
     remediation_sbom:
       bomFormat: ConcertDef
       specVersion: "2.0.0"

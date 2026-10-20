@@ -15,7 +15,13 @@ vuln_scan_dir: /var/lib/concert-vuln-scan
 # its scan job busy for over 15 minutes. Report what can be acted on.
 vuln_scan_severities: "CRITICAL,HIGH,MEDIUM"
 vuln_scan_ignore_unfixed: true   # only CVEs that have a fixed version
-vuln_scan_hostname: ""     # empty = Kubernetes node name (what Concert knows the host as)
+# The VM's identity in Concert: host scan (Nessus dnsName), Deploy SBOM (vm name/hostname)
+# and the OS-patch mapping all use it. It must differ from the k3s node name: Concert's
+# Kubernetes discovery already owns that name as a host of sub_type k8s:Node, a Deploy
+# SBOM with the same name is merged into it, and OS auto-remediation only looks at
+# hosts of sub_type vm ("No resource metadata found", verified 2026-10-20).
+concert_vm_host_name: "{{ ansible_hostname }}-vm"
+vuln_scan_hostname: "{{ concert_vm_host_name }}"
 concert_url: ""            # https://<concert route>; empty = scan only, no upload
 concert_api_key: ""
 

@@ -6,8 +6,9 @@
 # aws_inspector and qualys).
 #
 # Concert matches a scan to a host via dnsName == infrastructure component
-# reference_id, which for a k3s node is the Kubernetes node name. So the name
-# comes from `kubectl get nodes`, not from the Linux hostname.
+# reference_id. The name is concert_vm_host_name (defaults/main.yml), the VM host that
+# the Deploy SBOM of playbook-remediation-register.yaml creates with os/version, so the
+# findings land on the VM that Concert can patch.
 #
 # The upload (vuln_scan_upload.yaml) only runs when concert_url and
 # concert_api_key are given. At deploy time they are not, and the host does not
@@ -18,17 +19,9 @@
 - name: Install Trivy
   ansible.builtin.include_tasks: install_trivy.yaml
 
-- name: Resolve the host name Concert knows (Kubernetes node name)
-  ansible.builtin.shell: kubectl get nodes -o jsonpath='{.items[0].metadata.name}'
-  environment:
-    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  register: vuln_scan_node
-  changed_when: false
-  when: vuln_scan_hostname | length == 0
-
 - name: Set scan host name
   ansible.builtin.set_fact:
-    vuln_scan_host: "{{ vuln_scan_hostname if vuln_scan_hostname | length > 0 else vuln_scan_node.stdout }}"
+    vuln_scan_host: "{{ vuln_scan_hostname }}"
 
 - name: Create scan work directory
   ansible.builtin.file:

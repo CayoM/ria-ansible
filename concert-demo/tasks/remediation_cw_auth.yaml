@@ -4,11 +4,11 @@
 # How IBM's Remediation_Master > Apply_Ubuntu_Patch uses them (read from the workflow,
 # IBM/Concert v3.1.0 Remediation_Master.zip):
 #   - patches are grouped by recommendation.environment.host_name, i.e. the host name of
-#     the scan = Kubernetes node name;
+#     the scan = concert_vm_host_name (remediation_deploy_sbom.yaml);
 #   - Config Data Object: {"config": [{"auth": "<user>/<ansible auth>", "host": [<name>]}]}
 #     - "host" must hold that same name, not the IP;
 #   - Ansible authentication: the playbook runs on inventory group [canary] and looks up
-#     patch_data[inventory_hostname], so the inventory host is the node name with the
+#     patch_data[inventory_hostname], so the inventory host is that VM host name with the
 #     public IP as ansible_host. private_key_file is a JSON object {file name: base64 key}.
 # Concert Workflows API (same as optimized-solution): admin OAuth token with the web UI's
 # client pliant.io-spa, then PATCH /workflows/api/v1/authstorages/<user>/<name>.
@@ -21,7 +21,7 @@
     remediation_user: "{{ remediation_cw_user | default('ibmconcert') }}"
     remediation_auth: "{{ remediation_auth_name | default('remediation-linux-patch') }}"
     remediation_configs: "{{ remediation_configs_name | default('remediation-linux-configs') }}"
-    remediation_host: "{{ hostvars['ec2_target'].remediation_node.stdout }}"
+    remediation_host: "{{ hostvars['ec2_target'].remediation_vm_host }}"
 
 - name: Get a Concert Workflows admin token
   ansible.builtin.uri:
