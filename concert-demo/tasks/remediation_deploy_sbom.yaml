@@ -47,7 +47,7 @@
       {% endfor %}
       {{ workloads }}
   vars:
-    remediation_system_namespaces: [kube-system, kube-public, kube-node-lease, instana-agent]
+    remediation_system_namespaces: [kube-system, kube-public, kube-node-lease, instana-agent, metallb-system, kubecost]
     remediation_app_deployments: >-
       {{ (remediation_k8s_deployments.stdout | from_json)['items']
          | rejectattr('metadata.namespace', 'in', remediation_system_namespaces) | list }}

@@ -59,9 +59,19 @@
           rules:
             # A host name makes the ingress an exposed endpoint that Concert can model
             # (nip.io resolves <name>.<ip>.nip.io to <ip>, no DNS setup needed). The same
-            # name is the target for external scans.
+            # name is the target for external scans. The second rule without a host keeps
+            # the shop reachable on the bare IP (http://<ip>/) as before.
             - host: web.{{ ec2_public_ip.stdout }}.nip.io
               http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: web
+                        port:
+                          number: 8080
+            - http:
                 paths:
                   - path: /
                     pathType: Prefix
@@ -163,9 +173,19 @@
           rules:
             # A host name makes the ingress an exposed endpoint that Concert can model
             # (nip.io resolves <name>.<ip>.nip.io to <ip>, no DNS setup needed). The same
-            # name is the target for external scans.
+            # name is the target for external scans. The second rule without a host keeps
+            # the shop reachable on the bare IP (http://<ip>/) as before.
             - host: web.{{ ec2_public_ip.stdout }}.nip.io
               http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: web
+                        port:
+                          number: 8080
+            - http:
                 paths:
                   - path: /
                     pathType: Prefix
