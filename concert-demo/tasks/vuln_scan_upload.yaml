@@ -1,16 +1,28 @@
 # Upload {{ vuln_scan_dir }}/vm_scan.json to IBM Concert as a vm_scan.
 # Concert re-evaluates the host on every upload: CVEs missing from the new
 # scan are closed, so a re-run after a fix shows the fixed state.
-# A scan without findings (all CVEs patched) is an empty file, which Concert cannot
-# parse ("No matching JSONata expression found"). Docs "Archiving vulnerabilities from
-# zero-vulnerability scan files": with scanner_name and scan_objects
-# [{"resource_reference_id": <host>}] Concert archives the host's previous findings.
+# A scan without findings (all CVEs patched): an empty JSON list matches none of
+# Concert's JSONata mappings ("No matching JSONata expression found", ERR_FILE_PARSING_1),
+# only an empty CSV reaches its zero-vulnerability branch (roja-pipeline
+# vulnlib/main.py process_zero_vul_file). So a header-only CSV in the Concert format
+# (header of IBM's sample vm_scan_concert_sample.csv) goes up instead, with scanner_name
+# and scan_objects [{"resource_reference_id": <host>}] (docs "Archiving vulnerabilities
+# from zero-vulnerability scan files"), and Concert archives the host's previous findings.
+
+- name: Write a header-only CSV for a scan without findings
+  ansible.builtin.copy:
+    dest: "{{ vuln_scan_dir }}/vm_scan.csv"
+    mode: "0644"
+    content: |
+      CVE,Host IPAddress,Host Name,Package,Package Version,Package Path,severity,Score,hasFix,Fixed Version,Description
+  when: (vuln_scan_cve_count | default(1) | int) == 0
 
 - name: Upload the host scan to Concert
   ansible.builtin.include_tasks: concert_upload.yaml
   vars:
     upload_data_type: vm_scan
-    upload_file: "{{ vuln_scan_dir }}/vm_scan.json"
+    upload_file: "{{ vuln_scan_dir }}/vm_scan.{{ 'csv' if (vuln_scan_cve_count | default(1) | int) == 0 else 'json' }}"
+    upload_content_type: "{{ 'text/csv' if (vuln_scan_cve_count | default(1) | int) == 0 else 'application/json' }}"
     upload_metadata: >-
       {{ {'scanner_name': 'nessus', 'scan_date': ansible_date_time.epoch}
          | combine({'scan_objects': [{'resource_reference_id': vuln_scan_host}] | to_json}
