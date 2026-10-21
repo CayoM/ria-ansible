@@ -16,6 +16,11 @@
 # file in its temp dir and runs ansible-playbook there, so the inventory references the
 # file name relatively. The key must end with a newline (docs: "add an extra newline after
 # the key"), else OpenSSH rejects it ("Permission denied (publickey)", seen 2026-10-21).
+# The key in Vault has Windows line endings (CRLF); AWX accepts that, the addon's OpenSSH
+# 9.9 does not ("Load key: invalid format", 2026-10-21), so carriage returns are removed.
+# The addon image's system crypto policy also leaves ssh-ed25519 out of
+# PubkeyAcceptedAlgorithms ("Skipping ssh-ed25519 key - corresponding algorithm not in
+# PubkeyAcceptedAlgorithms"); our demo key is ed25519, so the inventory adds it back.
 # Concert Workflows API (same as optimized-solution): admin OAuth token with the web UI's
 # client pliant.io-spa, then PATCH /workflows/api/v1/authstorages/<user>/<name>.
 #
@@ -56,10 +61,10 @@
       description: "SSH access for Concert OS patching (set by remediation-register)"
       serviceName: Ansible
       data:
-        private_key_file: "{{ {'vm.key': ((ssh_private_key | trim) ~ '\n') | b64encode} | to_json }}"
+        private_key_file: "{{ {'vm.key': ((ssh_private_key | replace('\r', '') | trim) ~ '\n') | b64encode} | to_json }}"
         inventory: |
           [canary]
-          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.key
+          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.key ansible_ssh_common_args='-o PubkeyAcceptedAlgorithms=+ssh-ed25519'
       canOverride: [private_key_file, inventory]
     body_format: json
     validate_certs: false
