@@ -61,14 +61,21 @@
       description: "SSH access for Concert OS patching (set by remediation-register)"
       serviceName: Ansible
       data:
-        private_key_file: "{{ {'vm.key': ((ssh_private_key | replace('\r', '') | trim) ~ '\n') | b64encode} | to_json }}"
+        private_key_file: "{{ {'vm.key': remediation_ssh_key | b64encode} | to_json }}"
         inventory: |
           [canary]
-          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.key ansible_ssh_common_args='-o PubkeyAcceptedAlgorithms=+ssh-ed25519'
+          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} {{ remediation_ssh_args }}
       canOverride: [private_key_file, inventory]
     body_format: json
     validate_certs: false
     status_code: [200, 204]
+  vars:
+    # regex '\r' (backslash escape): a raw CR in a Jinja template is read as a newline,
+    # which would strip every line break from the key.
+    remediation_ssh_key: "{{ (ssh_private_key | regex_replace('\\r', '') | trim) ~ '\n' }}"
+    remediation_ssh_args: >-
+      ansible_ssh_private_key_file=vm.key
+      ansible_ssh_common_args='-o PubkeyAcceptedAlgorithms=+ssh-ed25519'
   no_log: true
 
 - name: Map the VM's host name to the Ansible authentication
