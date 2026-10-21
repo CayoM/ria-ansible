@@ -10,12 +10,12 @@
 #   - Ansible authentication: the playbook runs on inventory group [canary] and looks up
 #     patch_data[inventory_hostname], so the inventory host is that VM host name with the
 #     public IP as ansible_host.
-# Ansible authentication format (docs "Auto-remediation for Red Hat Enterprise Linux
-# patching"): the OpenSSH private key pasted as plain text, with a trailing newline, and an
-# inventory line "<alias> ansible_host=<host> ansible_user=<user>" - the authentication
-# supplies the key, the inventory names no key file. (A {file: base64} object with
-# ansible_ssh_private_key_file, used before 2026-10-21, ends in "Permission denied
-# (publickey)".)
+# Ansible authentication format, from the Concert Workflows Ansible addon
+# (rna-core-addon-ansible, /opt/app-root/src/main.py): private_key_file arrives as
+# "private-keys", a JSON object {file name: base64 key}; the addon writes each key to that
+# file in its temp dir and runs ansible-playbook there, so the inventory references the
+# file name relatively. The key must end with a newline (docs: "add an extra newline after
+# the key"), else OpenSSH rejects it ("Permission denied (publickey)", seen 2026-10-21).
 # Concert Workflows API (same as optimized-solution): admin OAuth token with the web UI's
 # client pliant.io-spa, then PATCH /workflows/api/v1/authstorages/<user>/<name>.
 #
@@ -56,10 +56,10 @@
       description: "SSH access for Concert OS patching (set by remediation-register)"
       serviceName: Ansible
       data:
-        private_key_file: "{{ ssh_private_key | trim }}\n"
+        private_key_file: "{{ {'vm.key': ((ssh_private_key | trim) ~ '\n') | b64encode} | to_json }}"
         inventory: |
           [canary]
-          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }}
+          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.key
       canOverride: [private_key_file, inventory]
     body_format: json
     validate_certs: false
