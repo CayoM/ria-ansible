@@ -9,7 +9,13 @@
 #     - "host" must hold that same name, not the IP;
 #   - Ansible authentication: the playbook runs on inventory group [canary] and looks up
 #     patch_data[inventory_hostname], so the inventory host is that VM host name with the
-#     public IP as ansible_host. private_key_file is a JSON object {file name: base64 key}.
+#     public IP as ansible_host.
+# Ansible authentication format (docs "Auto-remediation for Red Hat Enterprise Linux
+# patching"): the OpenSSH private key pasted as plain text, with a trailing newline, and an
+# inventory line "<alias> ansible_host=<host> ansible_user=<user>" - the authentication
+# supplies the key, the inventory names no key file. (A {file: base64} object with
+# ansible_ssh_private_key_file, used before 2026-10-21, ends in "Permission denied
+# (publickey)".)
 # Concert Workflows API (same as optimized-solution): admin OAuth token with the web UI's
 # client pliant.io-spa, then PATCH /workflows/api/v1/authstorages/<user>/<name>.
 #
@@ -50,10 +56,10 @@
       description: "SSH access for Concert OS patching (set by remediation-register)"
       serviceName: Ansible
       data:
-        private_key_file: "{{ {'vm.b64': ssh_private_key | b64encode} | to_json }}"
+        private_key_file: "{{ ssh_private_key | trim }}\n"
         inventory: |
           [canary]
-          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }} ansible_ssh_private_key_file=vm.b64
+          {{ remediation_host }} ansible_host={{ ec2_ip }} ansible_user={{ remote_user }}
       canOverride: [private_key_file, inventory]
     body_format: json
     validate_certs: false
