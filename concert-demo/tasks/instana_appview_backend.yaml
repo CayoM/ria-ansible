@@ -1,0 +1,92 @@
+# Application perspective of this deployment on one Instana backend (instana_backend:
+# name, url, token), see setup_instana_appview.yaml. Also deletes the perspectives of
+# deployments that are gone, so the shared tenant does not fill up with one per demo run.
+# A failing backend only warns: the app is deployed already and the scans still have to run.
+
+- name: Application perspective on Instana {{ instana_backend.name }}
+  block:
+    - name: Read the application perspectives
+      ansible.builtin.uri:
+        url: "{{ instana_backend.url }}/api/application-monitoring/settings/application"
+        headers:
+          authorization: "apiToken {{ instana_backend.token }}"
+        validate_certs: false
+        return_content: true
+      register: instana_appview_list
+      no_log: true
+
+    # Only perspectives this task creates are pruned: label shaped like a deployment id
+    # and a filter on exactly that hostname prefix.
+    - name: Find this deployment's perspective and those of other deployments
+      ansible.builtin.set_fact:
+        instana_appview_existing: >-
+          {{ instana_appview_list.json | selectattr('label', 'equalto', instana_appview_label) | list }}
+        instana_appview_others: >-
+          {{ instana_appview_list.json
+             | rejectattr('label', 'equalto', instana_appview_label)
+             | selectattr('label', 'match', instana_appview_label_pattern)
+             | selectattr('tagFilterExpression.name', 'equalto', 'host.name')
+             | selectattr('tagFilterExpression.operator', 'equalto', 'STARTS_WITH')
+             | list }}
+
+    - name: Create or update the application perspective {{ instana_appview_label }}
+      ansible.builtin.uri:
+        url: >-
+          {{ instana_backend.url }}/api/application-monitoring/settings/application{{
+             ('/' ~ instana_appview_existing[0].id) if instana_appview_existing | length > 0 else '' }}
+        method: "{{ 'PUT' if instana_appview_existing | length > 0 else 'POST' }}"
+        headers:
+          authorization: "apiToken {{ instana_backend.token }}"
+        body: >-
+          {{ instana_appview_body | combine({'id': instana_appview_existing[0].id}
+             if instana_appview_existing | length > 0 else {}) }}
+        body_format: json
+        validate_certs: false
+        status_code: [200, 201]
+      changed_when: true
+      no_log: true
+
+    - name: Read the hosts of the demo zone that reported recently
+      ansible.builtin.uri:
+        url: >-
+          {{ instana_backend.url }}/api/infrastructure-monitoring/snapshots?{{
+             {'plugin': 'host', 'windowSize': instana_appview_prune_window_ms,
+              'query': 'entity.zone:"' ~ instana_zone_name ~ '"'} | urlencode }}
+        headers:
+          authorization: "apiToken {{ instana_backend.token }}"
+        validate_certs: false
+        return_content: true
+      register: instana_appview_hosts
+      when: instana_appview_others | length > 0
+      no_log: true
+
+    - name: Delete the perspectives of deployments without a reporting host
+      ansible.builtin.uri:
+        url: "{{ instana_backend.url }}/api/application-monitoring/settings/application/{{ item.id }}"
+        method: DELETE
+        headers:
+          authorization: "apiToken {{ instana_backend.token }}"
+        validate_certs: false
+        status_code: [200, 204]
+      loop: "{{ instana_appview_others }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: >-
+        instana_appview_hosts.json['items'] | map(attribute='label')
+        | select('match', '^' ~ (item.tagFilterExpression.value | regex_escape)) | list | length == 0
+
+    - name: Report the application perspective
+      ansible.builtin.debug:
+        msg: >-
+          Instana {{ instana_backend.name }}: application perspective {{ instana_appview_label }}
+          {{ 'updated' if instana_appview_existing | length > 0 else 'created' }}
+          (hosts {{ instana_appview_host_prefix }}*)
+
+  rescue:
+    - name: Warn that the application perspective is missing
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Instana {{ instana_backend.name }}: application perspective
+          {{ instana_appview_label }} not in place - {{ ansible_failed_task.name }}:
+          HTTP {{ ansible_failed_result.status | default('n/a') }}
+          {{ ansible_failed_result.msg | default('') }}

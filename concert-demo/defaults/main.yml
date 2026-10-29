@@ -50,8 +50,9 @@ sast_semgrep_config: "p/default"   # rule pack from the Semgrep registry (needs 
 sast_application_name: ""          # Concert application to attach the repository to (required)
 sast_application_version: "1.0.0"
 sast_app_name: ""                  # demo app (robotshop, qotd, ...), picks the repository from sast_repos
-sast_repos:                        # app -> source repository; an app without an entry is skipped
-  robotshop: "{{ robotshop_git_repo }}"
+# app -> source repository, from the demo app catalog; an app without git_repo is skipped
+sast_repos: "{{ demo_apps | selectattr('git_repo', 'defined') | rejectattr('git_repo', 'equalto', '')
+  | items2dict(key_name='name', value_name='git_repo') }}"
 sast_repo_url: ""                  # set to override the repository from sast_repos
 sast_force: false                  # true: scan even if Concert already holds a scan of this repository
 
@@ -78,12 +79,14 @@ instance_name: "cayo123"
 location: "south"
 new_hostname: "{{ instance_name }}-{{ service_type }}.{{ instana_zone_name | lower }}"
 
-# Terraform (needed to create Instana App View)
-terraform_version: latest
-terraform_pkg_url: "https://releases.hashicorp.com/terraform/{{ __terraform_version }}/terraform_{{ __terraform_version }}_linux_{{ base_arch[ansible_architecture] | default('amd64') }}.zip"
+# Demo app catalog: [{name, description, git_repo}]. Single source is optimized-solution
+# (inventory demo_apps), which sets it as extra vars on the AWX job templates; it feeds the
+# Concert Workflows tile, sast_repos and the Concert application description.
+demo_apps: []
+demo_app: "{{ demo_apps | selectattr('name', 'equalto', app_name) | first | default({}) }}"
 
 # Web App
-app_name: "robotshop" # robotshop, qotd, flightmonitor
+app_name: "robotshop" # a name from demo_apps
 service_type: "frontend" # frontend / backend / full
 app_namespace: "super-automation-demo"
 registry_pwd: ""
@@ -102,8 +105,21 @@ instana_namespace: instana-agent
 instana_repo_name: instana-agent
 instana_repo_url: https://agents.instana.io/helm
 instana_agent_key: ""
+# Application perspective per deployment (tasks/setup_instana_appview.yaml). The API
+# tokens come from the AWX credential "Instana API" (optimized-solution configure_awx.yml);
+# a backend without a token is skipped.
 instana_api_token: ""
 instana_api_endpoint: "tech-workshop.instana.io"
+instana_selfhosted_api_url: ""     # https://unit0-tenant0.instana.apps.<cluster>, the hub-attached Instana
+instana_selfhosted_api_token: ""
+instana_appview_label: "{{ instance_name }}"   # deployment id, e.g. robotshop-prod-a7f3
+# Hostnames are <deployment id>-<service_type>.<zone> (new_hostname), so the prefix
+# matches exactly the VMs of this deployment.
+instana_appview_host_prefix: "{{ instance_name }}-"
+# Perspectives of deployments whose hosts reported within this window are kept, older
+# ones of the same label pattern are deleted (demo VMs live about an hour).
+instana_appview_prune_window_ms: 7200000
+instana_appview_label_pattern: '^[a-z0-9]+-(prod|dev|int|stage)-[a-z0-9]{4}$'
 instana_endpoint_host: "ingress-green-saas.instana.io"
 instana_eum_key: ""
 instana_zone_name: "SUPER-AUTOMATION-DEMO-ZONE"

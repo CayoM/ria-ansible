@@ -55,16 +55,6 @@
 
 
 ################# App Deployment ##################
-- name: Include Instana Appview Setup
-  when: service_type == 'frontend' and app_name
-  ansible.builtin.include_tasks:
-    file: setup_instana_appview.yaml
-    apply:
-      tags:
-        - instana_appview
-  tags:
-    - instana_appview
-
 - name: Include Deployment of Flight Monitor App
   when: app_name == 'flightmonitor'
   ansible.builtin.include_tasks:
@@ -104,6 +94,28 @@
         - camera
   tags:
     - camera
+
+# The Concert Workflow puts the description on the Concert application
+# (Register-Concert-Kubernetes-Environment).
+- name: Publish the app description from the demo app catalog
+  ansible.builtin.set_stats:
+    data:
+      app_description: "{{ demo_app.description | default('') }}"
+
+# One application perspective per deployment. "backend" alone serves no calls
+# of its own, every other service_type runs the frontend.
+- name: Include Instana Appview Setup
+  when:
+    - feature_instana | bool
+    - service_type in ['frontend', 'full']
+    - app_name | length > 0
+  ansible.builtin.include_tasks:
+    file: setup_instana_appview.yaml
+    apply:
+      tags:
+        - instana_appview
+  tags:
+    - instana_appview
 ###################################################
 
 ################# Host Vulnerability Scan #########

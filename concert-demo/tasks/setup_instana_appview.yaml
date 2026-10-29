@@ -1,63 +1,49 @@
-# tasks file for configure_instana_application
-- name: Check if Terraform is already installed
-  ansible.builtin.command: terraform version
-  register: terraform_check
-  ignore_errors: true
-  changed_when: false
+# Instana application perspective per deployment, on every Instana backend the agent
+# reports to: SaaS and the self-hosted Instana attached to the Concert hub (Concert reads
+# the applications from there). Label = deployment id (also the Concert environment name),
+# filter = the hostnames of this deployment's VMs (instana_appview_host_prefix).
+#
+# REST API instead of the former Terraform run on the VM: Terraform kept its state on the
+# VM, so it could never update or delete a perspective, and its errors were ignored - with
+# no API token passed in, no perspective was created at all (seen 2026-10-27).
 
-- name: Download and Install Terraform
-  when: terraform_check.rc != 0
-  block:
-    - name: Linux/Unix | Find all versions of Terraform
-      ansible.builtin.uri:
-        url: https://releases.hashicorp.com/terraform/index.json
-        return_content: true
-      register: terraform_index
-      when: terraform_version == "latest"
-      check_mode: false
+- name: List the Instana backends that have an API token
+  ansible.builtin.set_fact:
+    instana_appview_backends: >-
+      {{ ([{'name': 'SaaS',
+            'url': 'https://' ~ (instana_api_endpoint | regex_replace('^https?://', '') | regex_replace('/+$', '')),
+            'token': instana_api_token}] if instana_api_token | length > 0 else [])
+         + ([{'name': 'self-hosted',
+              'url': instana_selfhosted_api_url | regex_replace('/+$', ''),
+              'token': instana_selfhosted_api_token}]
+            if instana_selfhosted_api_token | length > 0 and instana_selfhosted_api_url | length > 0 else []) }}
+    instana_appview_body:
+      label: "{{ instana_appview_label }}"
+      scope: INCLUDE_ALL_DOWNSTREAM
+      boundaryScope: ALL
+      accessRules:
+        - accessType: READ_WRITE
+          relationType: GLOBAL
+          relatedId: null
+      tagFilterExpression:
+        type: TAG_FILTER
+        name: host.name
+        operator: STARTS_WITH
+        entity: DESTINATION
+        value: "{{ instana_appview_host_prefix }}"
+        stringValue: "{{ instana_appview_host_prefix }}"
+  no_log: true
 
-    - name: Linux/Unix | Finds the latest Terraform version when latest var is define
-      ansible.builtin.set_fact:
-        __terraform_version: "{{ (terraform_index.content | from_json).versions | reject('search', '-') | list | sort_versions | last }}"
-      when: terraform_version == 'latest'
+- name: Report that no application perspective can be created
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: no Instana API token (AWX credential "Instana API"), no application
+      perspective for {{ instana_appview_label }}
+  when: instana_appview_backends | length == 0
 
-    - name: Linux/Unix | Use the specified Terraform version when latest var is not define
-      ansible.builtin.set_fact:
-        __terraform_version: "{{ terraform_version }}"
-      when: terraform_version != 'latest'
-
-    - name: Linux/Unix | Install Terraform
-      ansible.builtin.unarchive:
-        src: "{{ terraform_pkg_url }}"
-        dest: "/usr/local/bin/"
-        remote_src: true
-
-
-- name: Create needed dir
-  ansible.builtin.file:
-    path: "/tmp/instana/"
-    state: directory
-
-- name: Copy Files to dir
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: "/tmp/instana/"
-  loop:
-    - main.tf
-    - variables.tf
-
-- name: Create Template for variable
-  ansible.builtin.template:
-    src: terraform.tfvars.j2
-    dest: "/tmp/instana/terraform.tfvars"
-
-- name: Terraform Init
-  ansible.builtin.command: terraform init
-  args:
-    chdir: "/tmp/instana/"
-
-- name: Terraform Apply plan
-  ansible.builtin.command: terraform apply -auto-approve
-  args:
-    chdir: "/tmp/instana/"
-  failed_when: false
+- name: Create or update the application perspective on each backend
+  ansible.builtin.include_tasks: instana_appview_backend.yaml
+  loop: "{{ instana_appview_backends }}"
+  loop_control:
+    loop_var: instana_backend
+    label: "{{ instana_backend.name }}"
