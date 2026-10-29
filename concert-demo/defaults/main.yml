@@ -121,7 +121,8 @@ instana_appview_host_prefix: "{{ instance_name }}-"
 instana_appview_prune_window_ms: 7200000
 instana_appview_label_pattern: '^[a-z0-9]+-(prod|dev|int|stage)-[a-z0-9]{4}$'
 instana_endpoint_host: "ingress-green-saas.instana.io"
-instana_eum_key: ""
+instana_eum_key: ""      # website key (AWX job template extra var from optimized-solution); empty = EUM off
+instana_eum_url: ""      # EUM endpoint, e.g. https://instana-eum.apps.<cluster>/eum/; empty = https://<instana_endpoint_host>
 instana_zone_name: "SUPER-AUTOMATION-DEMO-ZONE"
 instana_cluster_name: "SUPER-AUTOMATION-DEMO-{{ instance_name }}"
 instanaEnumMinJsUrl: "https://eum.instana.io/1.7.5/eum.min.js"

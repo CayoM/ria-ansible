@@ -37,7 +37,7 @@
         helm upgrade --install robot-shop {{ robotshop_clone_dir }}/K8s/helm \
           -n {{ app_namespace }} --create-namespace \
           --set eum.key={{ instana_eum_key }} \
-          --set eum.url=https://{{ instana_endpoint_host }} \
+          --set eum.url={{ instana_eum_url | default("", true) or ("https://" ~ instana_endpoint_host) }} \
           --set nodeport=true --set openshift=false \
           -f - <<'YAML'
         {{ lookup('file', 'robotshop_web_only.yaml') }}
@@ -136,7 +136,7 @@
         helm upgrade --install robot-shop {{ robotshop_clone_dir }}/K8s/helm \
           -n {{ app_namespace }} --create-namespace \
           --set eum.key={{ instana_eum_key }} \
-          --set eum.url=https://{{ instana_endpoint_host }} \
+          --set eum.url={{ instana_eum_url | default("", true) or ("https://" ~ instana_endpoint_host) }} \
           --set nodeport=true --set openshift=false \
           -f - <<'YAML'
         {{ lookup('file', 'robotshop_non-web.yaml') }}
@@ -154,7 +154,7 @@
         helm upgrade --install robot-shop {{ robotshop_clone_dir }}/K8s/helm \
           -n {{ app_namespace }} --create-namespace \
           --set eum.key={{ instana_eum_key }} \
-          --set eum.url=https://{{ instana_endpoint_host }} \
+          --set eum.url={{ instana_eum_url | default("", true) or ("https://" ~ instana_endpoint_host) }} \
           --set nodeport=true --set openshift=false
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
