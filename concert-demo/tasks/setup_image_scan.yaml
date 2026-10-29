@@ -1,0 +1,129 @@
+# Image vulnerability scan for IBM Concert (image_scan, Grype)
+# ============================================================
+# Second opinion next to Concert's own Trivy discovery. Trivy only reads package
+# databases (dpkg, apk, npm, pip, ...), so a runtime built from source inside an
+# image stays invisible to it: PHP 7.4.23 in robotshop/rs-ratings (php2shell,
+# CVE-2026-109618), node 14 in rs-cart/-catalogue/-user, python 3.9 in rs-payment,
+# openjdk 8 in rs-shipping, redis, erlang/openssl in rabbitmq (compared 2026-10-27).
+# Grype also classifies binaries and finds them.
+#
+# The scanning happens in the Grype scanner service on the OpenShift cluster
+# (optimized-solution tasks/install_grype_scanner.yml): every demo VM runs the same
+# images, so it scans each image once per Grype DB and answers from its cache. Its
+# reports are Concert-ready CycloneDX (image name as Concert's discovery names it,
+# only Critical/High findings on binaries). Scanning on the VM itself took ~25 min.
+#
+# Flow: the VM lists the images of its pods -> the job pod (localhost, in the
+# cluster) posts them to the service -> one upload of all reports to Concert.
+# Findings are kept per scanner (vulnerability_assessment.scan_systems): a Grype
+# upload closes earlier Grype findings of an image, never Trivy's.
+#
+# Scope: the pods of image_scan_namespaces (default: the app namespace, the only one
+# Concert discovers on a demo VM, so only those images belong to an application).
+# Runs from setup_vuln_scan.yaml when the Concert variables are given.
+
+- name: List the pods to scan
+  ansible.builtin.command:
+    argv: [kubectl, get, pods, -n, "{{ item }}", -o, json]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  loop: "{{ image_scan_namespaces }}"
+  register: image_scan_pods
+  changed_when: false
+
+# One entry per running image: image = the name in the pod spec (tag for Concert),
+# imageID = the pulled digest (what the scanner scans and caches on).
+# Pods that never started (no imageID) are left out.
+- name: Collect the images of the pods
+  ansible.builtin.set_fact:
+    image_scan_images: >-
+      {{ image_scan_pods.results
+         | map(attribute='stdout') | map('from_json')
+         | map(attribute='items') | flatten
+         | map(attribute='status.containerStatuses', default=[]) | flatten
+         | selectattr('imageID', 'truthy')
+         | map('dict2items') | map('selectattr', 'key', 'in', ['image', 'imageID']) | map('items2dict')
+         | unique(attribute='imageID') | list }}
+
+# 503 while the service fetches a new Grype DB; an image it has not seen yet is
+# scanned on the spot (~30 s), all others come from the cache.
+- name: Get the image reports from the Grype scanner
+  ansible.builtin.uri:
+    url: "{{ image_scan_service_url }}/scan"
+    method: POST
+    body_format: json
+    body:
+      images: "{{ image_scan_images }}"
+    timeout: 900
+    status_code: [200]
+  delegate_to: localhost
+  become: false
+  register: image_scan_answer
+  retries: 10
+  delay: 30
+  until: image_scan_answer.status | default(0) == 200
+  when: image_scan_images | length > 0
+
+- name: Report images the scanner could not scan
+  ansible.builtin.debug:
+    msg: "{{ image_scan_answer.json.errors }}"
+  when:
+    - image_scan_answer.json is defined
+    - image_scan_answer.json.errors | length > 0
+
+# Reports without findings are left out: Concert has nothing to parse in them.
+- name: Keep the reports with findings
+  ansible.builtin.set_fact:
+    image_scan_results: >-
+      {{ (image_scan_answer.json.results | default([])) | selectattr('findings', '>', 0) | list }}
+
+- name: Create a local work directory for the reports
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: image-scan
+  delegate_to: localhost
+  become: false
+  register: image_scan_tmp
+  when: image_scan_results | length > 0
+
+- name: Write the reports
+  ansible.builtin.copy:
+    content: "{{ item.report | to_json }}"
+    dest: "{{ image_scan_tmp.path }}/{{ item.image | regex_replace('[^A-Za-z0-9._-]', '_') }}.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  loop: "{{ image_scan_results }}"
+  loop_control:
+    label: "{{ item.image }} ({{ item.findings }} findings, cached: {{ item.cached }})"
+
+- name: Upload all image scans to Concert in one request
+  ansible.builtin.include_tasks:
+    file: concert_upload.yaml
+    apply:
+      delegate_to: localhost
+      become: false
+  vars:
+    upload_data_type: image_scan
+    upload_file: >-
+      {{ image_scan_results
+         | map(attribute='image') | map('regex_replace', '[^A-Za-z0-9._-]', '_')
+         | map('regex_replace', '^(.*)$', image_scan_tmp.path ~ '/\1.json') | list }}
+    upload_metadata:
+      scanner_name: grype
+      scan_date: "{{ ansible_date_time.epoch }}"
+  when: image_scan_results | length > 0
+
+- name: Remove the local reports
+  ansible.builtin.file:
+    path: "{{ image_scan_tmp.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  when: image_scan_tmp.path is defined
+
+- name: Publish image scan summary as job artifacts
+  ansible.builtin.set_stats:
+    data:
+      image_scan_db_built: "{{ image_scan_answer.json.db_built | default('') }}"
+      image_scan_findings: "{{ dict(image_scan_results | map(attribute='image') | zip(image_scan_results | map(attribute='findings'))) }}"

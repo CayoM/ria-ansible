@@ -25,6 +25,14 @@ vuln_scan_hostname: "{{ concert_vm_host_name }}"
 concert_url: ""            # https://<concert route>; empty = scan only, no upload
 concert_api_key: ""
 
+# Image vulnerability scan (Grype -> Concert image_scan), see tasks/setup_image_scan.yaml.
+# Runs with the host scan when the Concert variables are given. The scanning and its
+# filter (Critical/High on binaries, CVEs without a fix included) live in the scanner
+# service on the cluster (optimized-solution tasks/install_grype_scanner.yml).
+feature_image_scan: true
+image_scan_namespaces: ["{{ app_namespace }}"]
+image_scan_service_url: "http://grype-scanner.concert-image-scan.svc:8080"
+
 # Compliance scan (Trivy CIS Kubernetes benchmark -> Concert compliance_posture), see tasks/setup_compliance_scan.yaml
 compliance_dir: /var/lib/concert-compliance-scan
 compliance_id: "k8s-cis-1.23"           # Trivy built-in spec, also the name of the Concert profile

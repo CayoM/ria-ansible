@@ -81,3 +81,12 @@
   when:
     - concert_url | length > 0
     - concert_api_key | length > 0
+
+# Same job, so the E2E flow and Refresh-Scans need no change. Only with the Concert
+# variables: at deploy time there is nothing to upload to yet.
+- name: Scan the app images with Grype
+  ansible.builtin.include_tasks: setup_image_scan.yaml
+  when:
+    - feature_image_scan | bool
+    - concert_url | length > 0
+    - concert_api_key | length > 0

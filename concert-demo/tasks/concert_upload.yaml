@@ -4,7 +4,8 @@
 # Inputs:
 #   concert_url, concert_api_key
 #   upload_data_type   e.g. vm_scan, static_code_scan, dynamic_scan
-#   upload_file        path of the file on the machine running this task
+#   upload_file        path of the file on the machine running this task, or a list of
+#                      paths: Concert takes up to 100 files in one request (image scans)
 #   upload_content_type  optional, default application/json (text/csv for CSV files)
 #   upload_metadata    dict, sent as the JSON "metadata" form field
 #
@@ -23,27 +24,24 @@
 # Concert's answer goes to a file so that a rejected upload can say why (the curl task
 # itself stays no_log because its stdin carries the API key).
 - name: "Upload {{ upload_data_type }} to Concert"
+  vars:
+    upload_file_list: "{{ [upload_file] if upload_file is string else upload_file }}"
+    upload_file_forms: >-
+      {{ (['--form'] * (upload_file_list | length))
+         | zip(upload_file_list | map('regex_replace', '^(.*)$',
+               'filename=@\1;type=' ~ (upload_content_type | default('application/json'))))
+         | flatten }}
   block:
     - name: "Send the {{ upload_data_type }} file"
       ansible.builtin.command:
-        argv:
-          - curl
-          - --silent
-          - --show-error
-          - --insecure
-          - --output
-          - "/tmp/concert-upload-{{ upload_data_type }}.response"
-          - --write-out
-          - "%{http_code}"
-          - --config
-          - "-"
-          - --form
-          - "data_type={{ upload_data_type }}"
-          - --form
-          - "filename=@{{ upload_file }};type={{ upload_content_type | default('application/json') }}"
-          - --form-string
-          - "metadata={{ upload_metadata | to_json }}"
-          - "{{ concert_url }}/ingestion/api/v1/upload_files"
+        argv: >-
+          {{ ['curl', '--silent', '--show-error', '--insecure',
+              '--output', '/tmp/concert-upload-' ~ upload_data_type ~ '.response',
+              '--write-out', '%{http_code}', '--config', '-',
+              '--form', 'data_type=' ~ upload_data_type]
+             + upload_file_forms
+             + ['--form-string', 'metadata=' ~ (upload_metadata | to_json),
+                concert_url ~ '/ingestion/api/v1/upload_files'] }}
         stdin: |
           header = "InstanceId: 0000-0000-0000-0000"
           header = "Authorization: C_API_KEY {{ concert_api_key }}"
