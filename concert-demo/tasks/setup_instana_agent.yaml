@@ -12,17 +12,23 @@
     --repo {{ instana_repo_url }} \
     --namespace {{ instana_namespace }} \
     --create-namespace \
-    --set {{ ('agent.key=' ~ instana_primary.key) | quote }} \
-    --set {{ ('agent.downloadKey=' ~ instana_primary.download_key) | quote }} \
+    --set "agent.key=$INSTANA_AGENT_KEY" \
+    --set "agent.downloadKey=$INSTANA_DOWNLOAD_KEY" \
     --set {{ ('agent.endpointHost=' ~ instana_primary.host) | quote }} \
-    --set-string {{ ('agent.endpointPort=' ~ instana_primary.port) | quote }} \
+    --set-string {{ ('agent.endpointPort="' ~ instana_primary.port ~ '"') | quote }} \
     --set zone.name={{ instana_zone_name }} \
     --set cluster.name="{{ instana_cluster_name }}" \
     {{ instana_additional_backend_args }} \
     instana-agent
+  # keys come from the environment, so they do not show up in the AWX job log
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+    INSTANA_AGENT_KEY: "{{ instana_primary.key }}"
+    INSTANA_DOWNLOAD_KEY: "{{ instana_primary.download_key }}"
+    INSTANA_SECOND_KEY: "{{ instana_selfhosted_agent_key | default('') }}"
   vars:
+    # The chart's InstanaAgent CRD wants endpointPort as a string; without the quotes
+    # inside the value the template renders it as a number and the install fails.
     # The self-hosted Instana attached to the Concert hub comes from the AWX
     # credential "Instana self-hosted" (optimized-solution, configure_awx.yml).
     # instana_selfhosted_primary true: it is the only backend (SaaS no longer used);
@@ -39,6 +45,6 @@
           'key': instana_agent_key, 'download_key': instana_agent_key} }}
     instana_additional_backend_args: >-
       {{ ('--set ' ~ ('agent.additionalBackends[0].endpointHost=' ~ instana_selfhosted_endpoint_host) | quote
-          ~ ' --set ' ~ ('agent.additionalBackends[0].endpointPort=' ~ instana_selfhosted_endpoint_port | default('443')) | quote
-          ~ ' --set ' ~ ('agent.additionalBackends[0].key=' ~ instana_selfhosted_agent_key) | quote)
+          ~ ' --set-string ' ~ ('agent.additionalBackends[0].endpointPort="' ~ instana_selfhosted_endpoint_port | default('443') ~ '"') | quote
+          ~ ' --set "agent.additionalBackends[0].key=$INSTANA_SECOND_KEY"')
          if instana_has_selfhosted | bool and not instana_selfhosted_only | bool else '' }}
