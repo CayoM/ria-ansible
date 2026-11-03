@@ -10,8 +10,10 @@
 # The scanning happens in the Grype scanner service on the OpenShift cluster
 # (optimized-solution tasks/install_grype_scanner.yml): every demo VM runs the same
 # images, so it scans each image once per Grype DB and answers from its cache. Its
-# reports are Concert-ready CycloneDX (image name as Concert's discovery names it,
-# only Critical/High findings on binaries). Scanning on the VM itself took ~25 min.
+# reports are Concert's custom CSV: only with image name, tag AND digest as Concert's
+# discovery knows them does a finding reach its application and criticality (CycloneDX
+# has either tag or digest: php2shell stayed at risk 1.6 without application, with the
+# CSV it is risk 10 on PROD). Only Critical/High findings on binaries.
 #
 # Flow: the VM lists the images of its pods -> the job pod (localhost, in the
 # cluster) posts them to the service -> one upload of all reports to Concert.
@@ -88,8 +90,8 @@
 
 - name: Write the reports
   ansible.builtin.copy:
-    content: "{{ item.report | to_json }}"
-    dest: "{{ image_scan_tmp.path }}/{{ item.image | regex_replace('[^A-Za-z0-9._-]', '_') }}.json"
+    content: "{{ item.csv }}"
+    dest: "{{ image_scan_tmp.path }}/{{ item.image | regex_replace('[^A-Za-z0-9._-]', '_') }}.csv"
     mode: "0600"
   delegate_to: localhost
   become: false
@@ -105,10 +107,11 @@
       become: false
   vars:
     upload_data_type: image_scan
+    upload_content_type: text/csv
     upload_file: >-
       {{ image_scan_results
          | map(attribute='image') | map('regex_replace', '[^A-Za-z0-9._-]', '_')
-         | map('regex_replace', '^(.*)$', image_scan_tmp.path ~ '/\1.json') | list }}
+         | map('regex_replace', '^(.*)$', image_scan_tmp.path ~ '/\1.csv') | list }}
     upload_metadata:
       scanner_name: grype
       scan_date: "{{ ansible_date_time.epoch }}"
