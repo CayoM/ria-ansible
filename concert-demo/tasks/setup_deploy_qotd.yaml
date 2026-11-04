@@ -56,7 +56,9 @@
 
 # nip.io host names: Concert models the exposed endpoint and the DAST scan uses
 # web.<ip>.nip.io as target (same convention as Robot Shop). The rule without a host
-# keeps the app reachable on the bare IP.
+# keeps the app reachable on the bare IP. The entrypoint is pinned to web: without it
+# the host-less rule also listens on Traefik's kubecost entrypoint (9090) and shadows
+# Kubecost.
 - name: Create Ingress for web and anomaly generator
   ansible.builtin.shell: |
     kubectl apply -f - <<EOF
@@ -65,6 +67,8 @@
     metadata:
       name: qotd-web-ingress
       namespace: {{ app_namespace }}
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
     spec:
       ingressClassName: traefik
       rules:
@@ -93,6 +97,8 @@
     metadata:
       name: qotd-anomaly-ingress
       namespace: {{ app_namespace }}-load
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
     spec:
       ingressClassName: traefik
       rules:
