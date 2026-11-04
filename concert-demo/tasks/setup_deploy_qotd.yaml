@@ -118,7 +118,7 @@
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   changed_when: false
 
-# Optional: start an anomaly scenario right away (qotd_anomaly_id, e.g. "ratings"), so
+# Optional: start an anomaly scenario right away (qotd_anomaly_id, e.g. "b_ratings"), so
 # Instana and Concert Operate have an incident to work on. Empty = leave it to the
 # demo (anomaly.<ip>.nip.io).
 - name: Start the anomaly scenario
