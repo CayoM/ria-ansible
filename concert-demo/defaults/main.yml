@@ -94,6 +94,11 @@ registry_pwd: ""
 # QotD
 qotd_repo_url: "https://gitlab.com/api/v4/projects/26143345/packages/helm/stable"
 qotd_repo_name: "qotd"
+qotd_replicas: 1                 # chart default is 2 per service, too much for one demo VM
+qotd_load_replicas: 1            # Selenium browsers of the load generator (chart default 4)
+qotd_default_loggers: true       # independent log messages (rating heartbeat, pdf incident codes)
+qotd_anomaly_auto_shutoff: true  # anomaly generator stops induced anomalies after 1 h
+qotd_anomaly_id: ""              # scenario to start after the deployment, e.g. "ratings"; empty = none
 
 # Robot Shop
 robotshop_git_repo: "https://github.com/instana/robot-shop.git"

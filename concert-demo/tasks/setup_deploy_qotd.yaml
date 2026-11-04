@@ -1,31 +1,136 @@
 # Deployment of the App Quote of the Day: https://gitlab.com/quote-of-the-day/quote-of-the-day/
+# One Helm chart carries the whole app (web, quote, author, rating, pdf, image,
+# engraving, qrcode, MariaDB) plus the load generator (Selenium) and the anomaly
+# generator (qotd-usecase) in a second namespace. The chart cannot be split into
+# frontend and backend, so every service_type deploys the full app.
+
+- name: Note that QotD is always deployed as a whole
+  ansible.builtin.debug:
+    msg: "QotD has no frontend/backend split, deploying the full app (service_type={{ service_type }})"
+  when: service_type != 'full'
+
 - name: Add Helm-Repo for Qotd
   ansible.builtin.shell: |
-    helm repo add {{ qotd_repo_name }} {{ qotd_repo_url }}
-
-- name: Update Helm-Repos
-  ansible.builtin.shell: |
+    helm repo add {{ qotd_repo_name }} {{ qotd_repo_url }} --force-update
     helm repo update
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
 
 - name: Create needed namespaces
   ansible.builtin.shell: |
-    kubectl create namespace {{ app_namespace }}
-    kubectl create namespace {{ app_namespace }}-load
-  register: create_namespaces_result
-  failed_when: create_namespaces_result.rc != 0 and
-               "AlreadyExists" not in create_namespaces_result.stderr
-
-- name: Install Quote of the day with Helm
-  ansible.builtin.shell: |
-    helm install qotd2 {{ qotd_repo_name }} \
-    --namespace {{ app_namespace }} \
-    --repo {{ qotd_repo_url }} \
-    --set host={{ instance_name }} \
-    --set enableInstana=true \
-    --set useNodePort=true \
-    --set instanaReportingUrl={{ instanaReportingUrl }} \
-    --set instanaEnumMinJsUrl={{ instanaEnumMinJsUrl }} \
-    --set appNamespace={{ app_namespace }} \
-    --set loadNamespace={{ app_namespace }}-load 
+    for ns in {{ app_namespace }} {{ app_namespace }}-load; do
+      kubectl get namespace "$ns" >/dev/null 2>&1 || kubectl create namespace "$ns"
+    done
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+
+# useNodePort=true: no OpenShift Routes; the ingress below publishes web and the
+# anomaly generator.
+- name: Install Quote of the day with Helm
+  ansible.builtin.shell: |
+    helm upgrade --install qotd {{ qotd_repo_name }}/qotd \
+      --namespace {{ app_namespace }} \
+      --set host={{ ec2_public_ip.stdout }}.nip.io \
+      --set useNodePort=true \
+      --set enableInstana={{ feature_instana | bool | lower }} \
+      --set setDefaultLoggers={{ qotd_default_loggers | bool | lower }} \
+      --set autoShutoff={{ qotd_anomaly_auto_shutoff | bool | lower }} \
+      --set branding="{{ instance_name }}" \
+      --set appNamespace={{ app_namespace }} \
+      --set loadNamespace={{ app_namespace }}-load
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+# The chart starts 2 replicas per service and 4 Selenium browsers; that is too much
+# for one demo VM.
+- name: Scale QotD down to demo size
+  ansible.builtin.shell: |
+    kubectl -n {{ app_namespace }} get deployments -o name | \
+      xargs -r -I{} kubectl -n {{ app_namespace }} scale {} --replicas={{ qotd_replicas }}
+    kubectl -n {{ app_namespace }}-load scale deployment/qotd-load --replicas={{ qotd_load_replicas }}
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+
+# nip.io host names: Concert models the exposed endpoint and the DAST scan uses
+# web.<ip>.nip.io as target (same convention as Robot Shop). The rule without a host
+# keeps the app reachable on the bare IP.
+- name: Create Ingress for web and anomaly generator
+  ansible.builtin.shell: |
+    kubectl apply -f - <<EOF
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: qotd-web-ingress
+      namespace: {{ app_namespace }}
+    spec:
+      ingressClassName: traefik
+      rules:
+        - host: web.{{ ec2_public_ip.stdout }}.nip.io
+          http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: qotd-web
+                    port:
+                      number: 3000
+        - http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: qotd-web
+                    port:
+                      number: 3000
+    ---
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: qotd-anomaly-ingress
+      namespace: {{ app_namespace }}-load
+    spec:
+      ingressClassName: traefik
+      rules:
+        - host: anomaly.{{ ec2_public_ip.stdout }}.nip.io
+          http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: qotd-usecase
+                    port:
+                      number: 3012
+    EOF
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Wait until QotD web and the anomaly generator are ready
+  ansible.builtin.shell: |
+    kubectl -n {{ app_namespace }} rollout status deployment/qotd-web --timeout=300s
+    kubectl -n {{ app_namespace }}-load rollout status deployment/qotd-usecase --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+
+# Optional: start an anomaly scenario right away (qotd_anomaly_id, e.g. "ratings"), so
+# Instana and Concert Operate have an incident to work on. Empty = leave it to the
+# demo (anomaly.<ip>.nip.io).
+- name: Start the anomaly scenario
+  ansible.builtin.uri:
+    url: "http://anomaly.{{ ec2_public_ip.stdout }}.nip.io/activate/{{ qotd_anomaly_id }}"
+    method: POST
+    body_format: json
+    body:
+      action: start
+    status_code: 200
+  register: qotd_anomaly_start
+  retries: 10
+  delay: 15
+  until: qotd_anomaly_start.status == 200
+  when: qotd_anomaly_id | length > 0
