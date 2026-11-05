@@ -5,7 +5,7 @@
     --namespace kubecost \
     --create-namespace \
     --version 2.8.7 \
-    --set global.clusterId={{ instana_cluster_name }}
+    --set prometheus.server.global.external_labels.cluster_id={{ instana_cluster_name }}
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
