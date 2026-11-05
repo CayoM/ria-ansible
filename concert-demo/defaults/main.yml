@@ -130,6 +130,9 @@ instana_eum_key: ""      # website key (AWX job template extra var from optimize
 instana_eum_url: ""      # EUM endpoint, e.g. https://instana-eum.apps.<cluster>/eum/; empty = https://<instana_endpoint_host>
 instana_zone_name: "SUPER-AUTOMATION-DEMO-ZONE"
 instana_cluster_name: "SUPER-AUTOMATION-DEMO-{{ instance_name }}"
+# Kubecost sensor of the Instana agent (only with feature_kubecost); in-cluster service, no ingress needed
+kubecost_url: "http://kubecost-cost-analyzer.kubecost.svc.cluster.local:9090"
+kubecost_poll_rate: 600
 instanaEnumMinJsUrl: "https://eum.instana.io/1.7.5/eum.min.js"
 instanaReportingUrl: "https://eum-green-saas.instana.io"
 

@@ -6,6 +6,24 @@
   ansible.builtin.shell: |
     helm repo update
 
+# Instana Kubecost sensor (remote): polls the Kubecost of this cluster and shows the costs on
+# Platforms > Kubernetes > <cluster> > Cost. Kubecost clusterId must equal cluster.name
+# (see setup_kubecost.yaml), otherwise Instana cannot match the two.
+- name: Write Instana agent values (Kubecost sensor)
+  when: feature_kubecost | bool
+  ansible.builtin.copy:
+    dest: /tmp/instana-agent-kubecost-values.yaml
+    mode: "0600"
+    content: |
+      agent:
+        configuration_yaml: |
+          com.instana.plugin.kubecost:
+            remote:
+              - url: {{ kubecost_url }}
+                poll_rate: {{ kubecost_poll_rate }}
+                clusters:
+                  - {{ instana_cluster_name }}
+
 - name: Install Instana Agent with Helm
   ansible.builtin.shell: |
     helm upgrade --install {{ instana_repo_name }} \
@@ -18,6 +36,7 @@
     --set-string {{ ('agent.endpointPort="' ~ instana_primary.port ~ '"') | quote }} \
     --set zone.name={{ instana_zone_name }} \
     --set cluster.name="{{ instana_cluster_name }}" \
+    {{ '-f /tmp/instana-agent-kubecost-values.yaml' if feature_kubecost | bool else '' }} \
     {{ instana_additional_backend_args }} \
     instana-agent
   # keys come from the environment, so they do not show up in the AWX job log
